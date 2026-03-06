@@ -1,0 +1,5 @@
+{
+  "name": "Test AI - AI Testing Architect",
+  "description": "A production-ready AI-assisted testing tool for API and UI automation using Gemini 3.1 Pro, Playwright, and Newman.",
+  "requestFramePermissions": []
+}
