@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.env
+.env.*
+!.env.example
+*.db
+test-results
+workspace
+.DS_Store
+.agent
+.gemini
+test-platform
+tests

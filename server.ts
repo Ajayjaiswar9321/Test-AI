@@ -1418,7 +1418,7 @@ class SupabaseStore implements DataStore {
 const store: DataStore =
   SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
     ? new SupabaseStore(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-    : new SqliteStore(new Database("bro_testing.db"));
+    : new SqliteStore(new Database(process.env.NODE_ENV === "production" ? "/app/data/bro_testing.db" : "bro_testing.db"));
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
