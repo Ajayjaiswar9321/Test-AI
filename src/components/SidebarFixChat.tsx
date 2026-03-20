@@ -151,7 +151,7 @@ export const SidebarFixChat: React.FC<SidebarFixChatProps> = ({
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-emerald-500/10">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-emerald-500/10">
         <div className="p-4 space-y-5">
           {messages.map((msg, i) => (
             <motion.div
@@ -173,8 +173,8 @@ export const SidebarFixChat: React.FC<SidebarFixChatProps> = ({
               )}
 
               {/* Message Bubble */}
-              <div className={`relative group flex-1 min-w-0 max-w-[calc(100%-3rem)] ${msg.role === "user" ? "text-right" : ""}`}>
-                <div className={`inline-block text-left p-3.5 rounded-2xl text-[13px] leading-[1.7] break-words ${
+              <div className={`relative group flex-1 min-w-0 max-w-[calc(100%-3rem)] overflow-hidden ${msg.role === "user" ? "text-right" : ""}`}>
+                <div className={`inline-block text-left p-3.5 rounded-2xl text-[13px] leading-[1.7] break-words max-w-full overflow-hidden ${
                   msg.role === "user"
                     ? "bg-emerald-500 text-white dark:text-black rounded-tr-md"
                     : "bg-gray-100 dark:bg-slate-900/80 text-gray-700 dark:text-slate-300 border border-gray-200 dark:border-slate-700/20 rounded-tl-md"
@@ -198,11 +198,11 @@ export const SidebarFixChat: React.FC<SidebarFixChatProps> = ({
                   </div>
 
                   {/* Content */}
-                  <div className={`chat-markdown ${msg.role === "user" ? "text-white dark:text-black" : ""}`}>
+                  <div className={`chat-markdown overflow-hidden ${msg.role === "user" ? "text-white dark:text-black" : ""}`}>
                     <ReactMarkdown
                       components={{
                         pre: ({ children }) => (
-                          <pre className="my-2 p-3 rounded-lg bg-gray-800 dark:bg-slate-950 text-emerald-300 dark:text-emerald-400 text-xs leading-relaxed overflow-x-auto border border-gray-700 dark:border-emerald-500/10 font-mono">
+                          <pre className="my-2 p-3 rounded-lg bg-gray-800 dark:bg-slate-950 text-emerald-300 dark:text-emerald-400 text-xs leading-relaxed overflow-x-auto max-w-full border border-gray-700 dark:border-emerald-500/10 font-mono">
                             {children}
                           </pre>
                         ),

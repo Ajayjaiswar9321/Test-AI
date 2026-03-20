@@ -664,58 +664,107 @@ class LocalAIEngine {
       scenarios.push({
         id: "login-valid",
         title: "Login with Valid Credentials",
-        objective: "Test login flow with valid test credentials.",
+        objective: "Test full login flow with realistic credentials.",
         risk: "high",
         steps: [
           "Navigate to the application",
-          `Fill ${emailInput ? `"${emailInput.placeholder || "email"}" field` : "email input"} with test data`,
-          "Fill password input with test data",
-          `Click on ${loginBtn ? `"${loginBtn.text}"` : "the login/submit"} button`,
+          `Fill email field with testuser@example.com`,
+          `Fill password field with Test@12345`,
+          `Click ${loginBtn ? `"${loginBtn.text}"` : "Login"} button`,
           "Wait for page response",
-          "Verify page responds to login attempt",
+          "Verify successful login or dashboard",
           "Capture screenshot of result",
         ],
       });
 
       scenarios.push({
         id: "login-empty-fields",
-        title: "Login with Empty Fields",
-        objective: "Test form validation when fields are left empty.",
+        title: "Login with Empty Fields (Negative)",
+        objective: "Verify form validation prevents submission with empty fields.",
         risk: "medium",
         steps: [
           "Navigate to the application",
-          `Click on ${loginBtn ? `"${loginBtn.text}"` : "the login/submit"} button`,
-          "Verify form validation messages appear",
+          "Clear email field",
+          "Clear password field",
+          `Submit the form`,
+          "Verify error or validation message is displayed",
           "Capture screenshot of validation state",
         ],
       });
 
       scenarios.push({
-        id: "login-invalid",
-        title: "Login with Invalid Credentials",
-        objective: "Verify error handling for wrong credentials.",
+        id: "login-invalid-email",
+        title: "Login with Invalid Email Format (Negative)",
+        objective: "Verify email validation rejects malformed emails.",
         risk: "high",
         steps: [
           "Navigate to the application",
-          `Fill ${emailInput ? `"${emailInput.placeholder || "email"}" field` : "email input"} with test data`,
-          "Fill password input with test data",
-          `Click on ${loginBtn ? `"${loginBtn.text}"` : "the login/submit"} button`,
-          "Verify error message is displayed",
+          "Fill email field with invalid-email-format",
+          "Fill password field with Test@12345",
+          `Click ${loginBtn ? `"${loginBtn.text}"` : "Login"} button`,
+          "Verify error or validation message is displayed",
           "Capture screenshot of error state",
+        ],
+      });
+
+      scenarios.push({
+        id: "login-wrong-password",
+        title: "Login with Wrong Password (Negative)",
+        objective: "Verify error handling for incorrect password.",
+        risk: "high",
+        steps: [
+          "Navigate to the application",
+          "Fill email field with testuser@example.com",
+          "Fill password field with wrongpassword123",
+          `Click ${loginBtn ? `"${loginBtn.text}"` : "Login"} button`,
+          "Verify login fails with invalid credentials error",
+          "Capture screenshot of error state",
+        ],
+      });
+
+      scenarios.push({
+        id: "login-only-email",
+        title: "Login with Only Email, No Password (Negative)",
+        objective: "Verify password field is required.",
+        risk: "medium",
+        steps: [
+          "Navigate to the application",
+          "Fill email field with testuser@example.com",
+          "Clear password field",
+          `Submit the form`,
+          "Verify error or validation message is displayed",
+          "Capture screenshot",
         ],
       });
 
       if (wantsLogin) {
         scenarios.push({
-          id: "login-password-masking",
-          title: "Password Field Masking",
-          objective: "Verify password input masks characters.",
-          risk: "low",
+          id: "login-sql-injection",
+          title: "Login SQL Injection Test (Security)",
+          objective: "Verify login form handles SQL injection attempts safely.",
+          risk: "high",
           steps: [
             "Navigate to the application",
-            "Fill password input with test data",
-            "Verify password field masks input characters",
-            "Capture screenshot of password field",
+            "Fill email field with ' OR '1'='1",
+            "Fill password field with ' OR '1'='1",
+            `Click ${loginBtn ? `"${loginBtn.text}"` : "Login"} button`,
+            "Verify login fails or error is shown",
+            "Capture screenshot",
+          ],
+        });
+
+        scenarios.push({
+          id: "login-xss-test",
+          title: "Login XSS Test (Security)",
+          objective: "Verify login form sanitizes script injection.",
+          risk: "high",
+          steps: [
+            "Navigate to the application",
+            "Fill email field with <script>alert('xss')</script>",
+            "Fill password field with <img onerror=alert(1) src=x>",
+            `Click ${loginBtn ? `"${loginBtn.text}"` : "Login"} button`,
+            "Verify no script executes and error is shown",
+            "Capture screenshot",
           ],
         });
       }
@@ -928,6 +977,51 @@ class LocalAIEngine {
       });
     }
 
+    // AUTO-DETECT: If page has forms but user didn't specify, generate functional tests
+    if (!hasSpecificIntent && a?.forms && a.forms.length > 0) {
+      for (const form of a.forms.slice(0, 3)) {
+        if (form.formType === "login" && !scenarios.some(s => s.id.includes("login"))) {
+          // Already handled above
+        } else if (form.formType !== "login" && form.formType !== "search" && form.fields.length > 0) {
+          const formLabel = form.formType !== "generic" ? form.formType : "form";
+          scenarios.push({
+            id: `form-${form.formType}-positive`,
+            title: `${form.formType.charAt(0).toUpperCase() + form.formType.slice(1)} Form — Valid Submission`,
+            objective: `Test ${formLabel} form with valid data.`,
+            risk: "medium",
+            steps: [
+              "Navigate to the application",
+              ...form.fields.slice(0, 6).map(f => {
+                const fieldName = f.label || f.placeholder || f.name || f.type;
+                let value = "Test input data";
+                if (f.type === "email") value = "testuser@example.com";
+                else if (f.type === "password") value = "Test@12345";
+                else if (f.type === "tel") value = "9876543210";
+                else if (f.name?.includes("name") || f.placeholder?.toLowerCase().includes("name")) value = "John Doe";
+                return `Fill ${fieldName} field with ${value}`;
+              }),
+              form.submitButton ? `Click ${form.submitButton} button` : "Submit the form",
+              "Verify no error message is displayed",
+              "Capture screenshot",
+            ],
+          });
+
+          scenarios.push({
+            id: `form-${form.formType}-negative`,
+            title: `${form.formType.charAt(0).toUpperCase() + form.formType.slice(1)} Form — Empty Submission (Negative)`,
+            objective: `Test ${formLabel} form validation with empty fields.`,
+            risk: "high",
+            steps: [
+              "Navigate to the application",
+              form.submitButton ? `Click ${form.submitButton} button` : "Submit the form",
+              "Verify error or validation message is displayed",
+              "Capture screenshot",
+            ],
+          });
+        }
+      }
+    }
+
     // BUTTON interactions (when no specific intent or page has buttons)
     if (!hasSpecificIntent && a?.buttons && a.buttons.length > 0) {
       const topBtns = a.buttons.slice(0, 3).map(b => b.text).filter(Boolean);
@@ -1034,6 +1128,24 @@ class LocalAIEngine {
 }
 
 // ===== Dynamic Page Analyzer =====
+interface FormField {
+  type: string;
+  name: string;
+  placeholder: string;
+  label: string;
+  required: boolean;
+  id: string;
+  validation: string;
+}
+
+interface FormInfo {
+  action: string;
+  method: string;
+  fields: FormField[];
+  submitButton: string;
+  formType: string; // login, signup, search, contact, checkout, generic
+}
+
 interface PageAnalysis {
   title: string;
   url: string;
@@ -1041,14 +1153,22 @@ interface PageAnalysis {
   buttons: { text: string; type: string }[];
   links: { text: string; href: string }[];
   inputs: { type: string; name: string; placeholder: string }[];
+  forms: FormInfo[];
   images: number;
   hasNav: boolean;
   hasFooter: boolean;
   hasSearch: boolean;
   hasLogin: boolean;
   hasForms: boolean;
+  hasSignup: boolean;
+  hasDropdowns: boolean;
+  hasModals: boolean;
+  hasTables: boolean;
+  hasCards: boolean;
+  interactiveElements: number;
   sections: number;
   bodyTextPreview: string;
+  pageType: string; // landing, dashboard, auth, ecommerce, blog, form-heavy, generic
 }
 
 async function analyzePage(targetUrl: string): Promise<PageAnalysis> {
@@ -1056,21 +1176,21 @@ async function analyzePage(targetUrl: string): Promise<PageAnalysis> {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 
   try {
-    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 10000 });
-    await page.waitForTimeout(1500); // Quick settle instead of slow networkidle
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+    await page.waitForTimeout(2000);
 
     const analysis: PageAnalysis = await page.evaluate(`(function(){
       var headings = Array.from(document.querySelectorAll("h1,h2,h3")).map(function(h){
         return { tag: h.tagName, text: (h.textContent||"").trim().substring(0,80) };
       }).filter(function(h){ return h.text; }).slice(0,12);
 
-      var buttons = Array.from(document.querySelectorAll("button:not([hidden]),[role='button']")).map(function(b){
-        return { text: (b.textContent||"").trim().substring(0,50), type: b.getAttribute("type")||"" };
-      }).filter(function(b){ return b.text && b.text.length < 50; }).slice(0,15);
+      var buttons = Array.from(document.querySelectorAll("button:not([hidden]),[role='button'],input[type='submit'],input[type='button']")).map(function(b){
+        return { text: (b.textContent||b.value||b.getAttribute("aria-label")||"").trim().substring(0,50), type: b.getAttribute("type")||"" };
+      }).filter(function(b){ return b.text && b.text.length < 50; }).slice(0,20);
 
       var links = Array.from(document.querySelectorAll("a[href]")).map(function(a){
         return { text: (a.textContent||"").trim().substring(0,60), href: a.getAttribute("href")||"" };
-      }).filter(function(l){ return l.text && l.text.length > 1 && l.text.length < 60; }).slice(0,15);
+      }).filter(function(l){ return l.text && l.text.length > 1 && l.text.length < 60; }).slice(0,20);
 
       var inputs = Array.from(document.querySelectorAll("input:not([type='hidden']),textarea,select")).map(function(i){
         return {
@@ -1080,6 +1200,59 @@ async function analyzePage(targetUrl: string): Promise<PageAnalysis> {
         };
       }).filter(function(i){ return i.type !== "hidden"; }).slice(0,20);
 
+      // Deep form analysis
+      var forms = Array.from(document.querySelectorAll("form")).map(function(form) {
+        var fields = Array.from(form.querySelectorAll("input:not([type='hidden']),textarea,select")).map(function(f) {
+          var id = f.getAttribute("id") || "";
+          var labelEl = id ? document.querySelector("label[for='" + id + "']") : null;
+          if (!labelEl) labelEl = f.closest("label");
+          var parentText = f.parentElement ? (f.parentElement.textContent||"").trim().substring(0,60) : "";
+          return {
+            type: f.getAttribute("type") || f.tagName.toLowerCase(),
+            name: f.getAttribute("name") || "",
+            placeholder: f.getAttribute("placeholder") || "",
+            label: labelEl ? (labelEl.textContent||"").trim().substring(0,60) : parentText.substring(0,60),
+            required: f.hasAttribute("required") || f.getAttribute("aria-required") === "true",
+            id: id,
+            validation: f.getAttribute("pattern") || f.getAttribute("minlength") ? "minlength:" + f.getAttribute("minlength") : f.getAttribute("maxlength") ? "maxlength:" + f.getAttribute("maxlength") : ""
+          };
+        });
+        var submitBtn = form.querySelector("button[type='submit'],input[type='submit'],button:not([type])");
+        var submitText = submitBtn ? (submitBtn.textContent||submitBtn.value||"").trim() : "";
+        var fieldTypes = fields.map(function(f){ return f.type; });
+        var formType = "generic";
+        if (fieldTypes.includes("password") && fields.length <= 4) formType = "login";
+        if (fieldTypes.includes("password") && (fields.some(function(f){ return f.name.match(/confirm|repeat|re.?pass/i); }) || fields.length > 4)) formType = "signup";
+        if (fieldTypes.includes("search") || fields.some(function(f){ return f.placeholder.toLowerCase().includes("search"); })) formType = "search";
+        if (fields.some(function(f){ return f.name.match(/phone|address|city|zip|country/i); })) formType = "contact";
+        if (fields.some(function(f){ return f.name.match(/card|cvv|expiry|billing/i); })) formType = "checkout";
+        if (submitText.toLowerCase().match(/sign.?up|register|create/)) formType = "signup";
+        return {
+          action: form.getAttribute("action") || "",
+          method: (form.getAttribute("method") || "GET").toUpperCase(),
+          fields: fields,
+          submitButton: submitText,
+          formType: formType
+        };
+      }).slice(0,10);
+
+      var bodyText = (document.body.innerText||"").toLowerCase();
+      var hasSignup = !!document.querySelector("input[name*='confirm' i],input[name*='register' i]") || bodyText.includes("sign up") || bodyText.includes("register") || bodyText.includes("create account");
+      var hasDropdowns = document.querySelectorAll("select,[role='listbox'],[role='combobox']").length > 0;
+      var hasModals = document.querySelectorAll("[role='dialog'],dialog,.modal,[class*='modal']").length > 0;
+      var hasTables = document.querySelectorAll("table,[role='grid'],[role='table']").length > 0;
+      var hasCards = document.querySelectorAll("[class*='card'],[class*='Card'],[class*='product'],[class*='item']").length > 2;
+      var interactiveElements = document.querySelectorAll("button,a[href],input,select,textarea,[role='button'],[tabindex]").length;
+
+      // Detect page type
+      var pageType = "generic";
+      if (document.querySelector("input[type='password']") && forms.some(function(f){ return f.formType === "login"; })) pageType = "auth";
+      else if (hasCards && bodyText.match(/cart|price|\\$|buy|shop|product/)) pageType = "ecommerce";
+      else if (hasTables && bodyText.match(/dashboard|analytics|overview|stats/)) pageType = "dashboard";
+      else if (forms.length > 0 && inputs.length > 3) pageType = "form-heavy";
+      else if (bodyText.match(/blog|article|post|read more/)) pageType = "blog";
+      else if (headings.length > 2 && buttons.length > 1 && links.length > 5) pageType = "landing";
+
       return {
         title: document.title || "",
         url: window.location.href,
@@ -1087,14 +1260,22 @@ async function analyzePage(targetUrl: string): Promise<PageAnalysis> {
         buttons: buttons,
         links: links,
         inputs: inputs,
+        forms: forms,
         images: document.querySelectorAll("img").length,
         hasNav: !!document.querySelector("nav,[role='navigation']"),
         hasFooter: !!document.querySelector("footer"),
         hasSearch: !!document.querySelector("input[type='search'],input[placeholder*='search' i],input[name*='search' i]"),
         hasLogin: !!document.querySelector("input[type='password']"),
         hasForms: document.querySelectorAll("form").length > 0,
+        hasSignup: hasSignup,
+        hasDropdowns: hasDropdowns,
+        hasModals: hasModals,
+        hasTables: hasTables,
+        hasCards: hasCards,
+        interactiveElements: interactiveElements,
         sections: document.querySelectorAll("section,main,[class*='section'],[class*='container']").length,
-        bodyTextPreview: (document.body.innerText||"").substring(0,300)
+        bodyTextPreview: (document.body.innerText||"").substring(0,500),
+        pageType: pageType
       };
     })()`);
 
@@ -1664,41 +1845,55 @@ app.post("/api/ui-plan", authenticate, async (req, res) => {
     if (GEMINI_KEY) {
       try {
         const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const formsContext = pageAnalysis?.forms?.length ? `
+FORMS DETECTED (${pageAnalysis.forms.length}):
+${pageAnalysis.forms.map((f, i) => `  Form ${i + 1} (${f.formType}): method=${f.method}, submit="${f.submitButton}"
+    Fields: ${f.fields.map(fd => `${fd.type}[name="${fd.name}", label="${fd.label}", placeholder="${fd.placeholder}", required=${fd.required}]`).join(", ")}`).join("\n")}` : "";
+
         const analysisContext = pageAnalysis ? `
-PAGE ANALYSIS (real data from crawling ${url}):
+PAGE ANALYSIS (real crawl data from ${url}):
 - Title: "${pageAnalysis.title}"
+- Page Type: ${pageAnalysis.pageType}
 - Headings: ${pageAnalysis.headings.map(h => `${h.tag}: "${h.text}"`).join(", ") || "none"}
 - Buttons: ${pageAnalysis.buttons.map(b => `"${b.text}"`).join(", ") || "none"}
-- Links: ${pageAnalysis.links.map(l => `"${l.text}"`).join(", ") || "none"}
-- Inputs: ${pageAnalysis.inputs.map(i => `${i.type}(${i.placeholder || i.name || "unnamed"})`).join(", ") || "none"}
-- Has Login Form: ${pageAnalysis.hasLogin}
-- Has Search: ${pageAnalysis.hasSearch}
-- Has Navigation: ${pageAnalysis.hasNav}
-- Has Footer: ${pageAnalysis.hasFooter}
-- Has Forms: ${pageAnalysis.hasForms}
-- Images: ${pageAnalysis.images}
-- Sections: ${pageAnalysis.sections}` : "Page analysis unavailable - generate based on goal.";
+- Links: ${pageAnalysis.links.map(l => `"${l.text}" (${l.href})`).join(", ") || "none"}
+- Inputs: ${pageAnalysis.inputs.map(i => `${i.type}(name="${i.name}", placeholder="${i.placeholder}")`).join(", ") || "none"}
+${formsContext}
+- Has Login: ${pageAnalysis.hasLogin} | Has Signup: ${pageAnalysis.hasSignup} | Has Search: ${pageAnalysis.hasSearch}
+- Has Nav: ${pageAnalysis.hasNav} | Has Footer: ${pageAnalysis.hasFooter} | Has Dropdowns: ${pageAnalysis.hasDropdowns}
+- Has Tables: ${pageAnalysis.hasTables} | Has Cards: ${pageAnalysis.hasCards} | Has Modals: ${pageAnalysis.hasModals}
+- Interactive Elements: ${pageAnalysis.interactiveElements} | Sections: ${pageAnalysis.sections} | Images: ${pageAnalysis.images}
+- Body Preview: "${pageAnalysis.bodyTextPreview.substring(0, 300)}"` : "Page analysis unavailable - generate based on goal.";
 
-        const prompt = `You are a senior QA architect. Generate DYNAMIC test scenarios SPECIFICALLY for the user's goal.
+        const prompt = `You are a senior QA automation architect. Generate COMPREHENSIVE FUNCTIONAL test scenarios that test the REAL FUNCTIONALITY of this website — not just UI appearance.
 
 URL: ${url}
 USER'S GOAL: "${goal}"
-Suite: ${suiteType}
+${authNotes ? `AUTH NOTES: ${authNotes}` : ""}
 ${analysisContext}
 
-CRITICAL RULES:
-1. Generate scenarios that DIRECTLY match the user's goal. If they say "test login", generate 5-7 login-specific scenarios (valid login, invalid login, empty fields, password masking, etc.)
-2. If the goal is specific (login, search, forms, navigation), focus 70% of scenarios on that specific area
-3. Use REAL element names from the page analysis (actual button text, input placeholders, heading text)
-4. Each step must be a natural-language instruction using action verbs: Navigate, Verify, Click, Fill, Scroll, Check, Capture, Test, Wait, Hover
-5. Generate 6-10 scenarios total
+CRITICAL RULES FOR FUNCTIONAL TESTING:
+1. You must test ACTUAL FUNCTIONALITY — fill forms, click buttons, test login/signup flows, test search, test navigation, test CRUD operations
+2. For EVERY form detected: generate BOTH positive tests (valid data) AND negative tests (empty fields, invalid email, short password, SQL injection, XSS)
+3. If there's a login form: test valid login flow, test with empty email, test with empty password, test with invalid email format, test with wrong credentials
+4. If there's a signup form: test valid registration, test password mismatch, test existing email, test required field validation
+5. If there's a search: test valid search, test empty search, test special characters, test no results
+6. For each form field, use REALISTIC test data based on field type:
+   - email fields: use "testuser@example.com" for valid, "invalid-email" for invalid
+   - password fields: use "Test@12345" for valid, "123" for too short
+   - text/name fields: use "John Doe" for valid, leave empty for negative
+   - phone fields: use "9876543210" for valid, "abc" for invalid
+7. Each step must use these action verbs: Navigate, Verify, Click, Fill, Scroll, Check, Capture, Test, Wait, Hover, Submit, Clear
+8. For Fill steps, ALWAYS include the field identifier and value: "Fill email field with testuser@example.com", "Fill password field with Test@12345"
+9. Generate 8-14 scenarios covering: happy path, negative tests, edge cases, validation, error handling
+10. Mark negative/edge case tests as "high" risk
 
 Return strict JSON:
 {
-  "summary": "one sentence describing the test plan",
+  "summary": "one sentence describing the comprehensive test plan",
   "scenarios": [
-    { "id": "short-id", "title": "title", "objective": "what this validates", "risk": "low|medium|high",
-      "steps": ["Navigate to the application", "Verify heading X is visible", "Click on Y button", "Capture screenshot"] }
+    { "id": "short-id", "title": "Descriptive Title", "objective": "what functionality this validates", "risk": "low|medium|high",
+      "steps": ["Navigate to the application", "Verify login form is visible", "Fill email field with testuser@example.com", "Fill password field with Test@12345", "Click Login button", "Verify successful login or dashboard", "Capture screenshot"] }
   ]
 }`;
         const result = await model.generateContent(prompt);
@@ -1726,7 +1921,7 @@ Return strict JSON:
     }
 
     const analysisNote = pageAnalysis
-      ? `Analyzed "${pageAnalysis.title}": ${pageAnalysis.headings.length} headings, ${pageAnalysis.buttons.length} buttons, ${pageAnalysis.links.length} links, ${pageAnalysis.inputs.length} inputs.`
+      ? `Analyzed "${pageAnalysis.title}" (${pageAnalysis.pageType}): ${pageAnalysis.forms?.length || 0} forms, ${pageAnalysis.buttons.length} buttons, ${pageAnalysis.inputs.length} inputs, ${pageAnalysis.interactiveElements || 0} interactive elements.`
       : "";
 
     res.json({
@@ -1990,7 +2185,7 @@ Reply with ONLY the suggestion, no code.`;
 
       const browser = await chromium.launch({ headless: true });
       activeBrowsers.set(runId, browser);
-      const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+      const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 });
 
       // KaneAI-like: Network monitoring during test
       const networkLog: Array<{ url: string; method: string; status?: number; type: string; time: string }> = [];
@@ -2009,7 +2204,7 @@ Reply with ONLY the suggestion, no code.`;
 
       const capture = async (): Promise<string> => {
         try {
-          const shot = await page.screenshot({ type: "jpeg", quality: 55 });
+          const shot = await page.screenshot({ type: "jpeg", quality: 85 });
           return `data:image/jpeg;base64,${shot.toString("base64")}`;
         } catch { return ""; }
       };
@@ -2020,7 +2215,7 @@ Reply with ONLY the suggestion, no code.`;
         if (capturingFrame || stopFlags.has(runId)) return;
         capturingFrame = true;
         try {
-          const shot = await page.screenshot({ type: "jpeg", quality: 25 });
+          const shot = await page.screenshot({ type: "jpeg", quality: 65 });
           emit({ type: "frame", preview: `data:image/jpeg;base64,${shot.toString("base64")}` });
         } catch {}
         capturingFrame = false;
@@ -2107,6 +2302,59 @@ Reply with ONLY the suggestion, no code.`;
               const preview = await capture();
               await smartStep(stepText,hasOverflow ? "failed" : "passed", hasOverflow ? "Horizontal overflow detected" : "No overflow - responsive", preview);
               await page.setViewportSize({ width: 1280, height: 720 });
+            } else if (lower.includes("error") || lower.includes("validation") || lower.includes("alert") || lower.includes("warning") || lower.includes("message")) {
+              // Check for error/validation/success messages on the page
+              const errorSels = ".error, .alert, .warning, .danger, .invalid, .validation, [class*='error'], [class*='alert'], [class*='warning'], [class*='invalid'], [role='alert'], .toast, .notification, .message";
+              const errorEls = page.locator(errorSels);
+              const errCount = await errorEls.count();
+              let errorTexts: string[] = [];
+              for (let i = 0; i < Math.min(errCount, 5); i++) {
+                const vis = await errorEls.nth(i).isVisible().catch(() => false);
+                if (vis) {
+                  const t = await errorEls.nth(i).textContent().catch(() => "");
+                  if (t && t.trim()) errorTexts.push(t.trim().substring(0, 100));
+                }
+              }
+              const preview = await capture();
+              if (lower.includes("no error") || lower.includes("no validation") || lower.includes("success")) {
+                await smartStep(stepText, errorTexts.length === 0 ? "passed" : "failed", errorTexts.length === 0 ? "No errors displayed" : `Found errors: ${errorTexts.join("; ")}`, preview);
+              } else {
+                await smartStep(stepText, errorTexts.length > 0 ? "passed" : "failed", errorTexts.length > 0 ? `Found: ${errorTexts.join("; ")}` : "No error/validation messages found", preview);
+              }
+            } else if (lower.includes("login") || lower.includes("dashboard") || lower.includes("welcome") || lower.includes("logged in") || lower.includes("authenticated") || lower.includes("profile")) {
+              // Check for successful login indicators
+              const urlNow = page.url();
+              const pageText = await page.locator("body").innerText().catch(() => "");
+              const lowText = pageText.toLowerCase();
+              const isLoggedIn = lowText.includes("dashboard") || lowText.includes("welcome") || lowText.includes("profile") || lowText.includes("logout") || lowText.includes("sign out") || lowText.includes("my account") || urlNow.includes("dashboard") || urlNow.includes("home") || urlNow.includes("profile");
+              const hasError = lowText.includes("invalid") || lowText.includes("incorrect") || lowText.includes("wrong") || lowText.includes("failed") || lowText.includes("error");
+              const preview = await capture();
+              if (lower.includes("fail") || lower.includes("invalid") || lower.includes("error") || lower.includes("reject")) {
+                // Expecting login failure
+                await smartStep(stepText, hasError ? "passed" : "failed", hasError ? "Login correctly rejected" : isLoggedIn ? "Login succeeded (expected failure)" : `Page URL: ${urlNow}`, preview);
+              } else {
+                // Expecting login success
+                await smartStep(stepText, isLoggedIn ? "passed" : "failed", isLoggedIn ? `Logged in — URL: ${urlNow}` : hasError ? `Login failed — Error detected on page` : `Could not confirm login — URL: ${urlNow}`, preview);
+              }
+            } else if (lower.includes("url") || lower.includes("redirect") || lower.includes("navigate")) {
+              // Check URL changed / redirected
+              const urlNow = page.url();
+              const preview = await capture();
+              await smartStep(stepText, urlNow ? "passed" : "failed", `Current URL: ${urlNow}`, preview);
+            } else if (lower.includes("text") || lower.includes("contain") || lower.includes("display")) {
+              // Check for specific text on page
+              const textMatch = stepText.match(/(?:text|contain|display)\w*\s+["'](.+?)["']/i) || stepText.match(/(?:verify|check|ensure)\s+(?:that\s+)?["'](.+?)["']\s+(?:is\s+)?(?:visible|displayed|shown|present)/i);
+              if (textMatch) {
+                const searchText = textMatch[1];
+                const found = page.locator(`text="${searchText}"`).first();
+                const vis = await found.isVisible({ timeout: 3000 }).catch(() => false);
+                const preview = await capture();
+                await smartStep(stepText, vis ? "passed" : "failed", vis ? `Found text: "${searchText}"` : `Text "${searchText}" not found on page`, preview);
+              } else {
+                const bodyText = await page.locator("body").innerText().catch(() => "");
+                const preview = await capture();
+                await smartStep(stepText, bodyText.length > 50 ? "passed" : "failed", `Page has ${bodyText.length} chars of content`, preview);
+              }
             } else {
               // Generic verification: check page is loaded and has content
               const title = await page.title();
@@ -2123,32 +2371,40 @@ Reply with ONLY the suggestion, no code.`;
         }
 
         // Click / Press / Tap / Select
-        if (lower.includes("click") || lower.includes("press") || lower.includes("tap") || lower.includes("select")) {
+        if (lower.includes("click") || lower.includes("press") || lower.includes("tap") || (lower.includes("select") && !lower.includes("fill") && !lower.includes("type"))) {
           await smartStep(stepText,"running");
           try {
-            // Try to extract target text from step description
             const textMatch = stepText.match(/(?:click|press|tap|select)\s+(?:on\s+)?(?:the\s+)?["']?(.+?)["']?\s*$/i);
             let clicked = false;
             if (textMatch) {
-              const target = textMatch[1].replace(/button|link|element|the/gi, "").trim();
+              const target = textMatch[1].replace(/\b(button|link|element|the|icon|tab|menu|item|option)\b/gi, "").trim();
               if (target) {
-                const el = page.locator(`button:has-text("${target}"), a:has-text("${target}"), [role="button"]:has-text("${target}")`).first();
-                if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
-                  await el.click({ timeout: 3000 });
-                  clicked = true;
-                  await page.waitForTimeout(500);
-                  const preview = await capture();
-                  await smartStep(stepText,"passed", `Clicked: "${target}"`, preview);
+                // Broader search: buttons, links, inputs, divs with role, spans, etc.
+                const selectorList = [
+                  `button:has-text("${target}")`, `a:has-text("${target}")`, `[role="button"]:has-text("${target}")`,
+                  `input[value*="${target}" i]`, `[role="tab"]:has-text("${target}")`, `[role="menuitem"]:has-text("${target}")`,
+                  `span:has-text("${target}")`, `div:has-text("${target}")`, `li:has-text("${target}")`
+                ];
+                for (const sel of selectorList) {
+                  const el = page.locator(sel).first();
+                  if (await el.isVisible({ timeout: 1500 }).catch(() => false)) {
+                    await el.click({ timeout: 3000 });
+                    clicked = true;
+                    await page.waitForTimeout(1000);
+                    const preview = await capture();
+                    await smartStep(stepText,"passed", `Clicked: "${target}"`, preview);
+                    break;
+                  }
                 }
               }
             }
             if (!clicked) {
               // Fallback: click first visible button
-              const btn = page.locator("button:visible").first();
+              const btn = page.locator("button:visible, [role='button']:visible, input[type='submit']:visible").first();
               if (await btn.isVisible({ timeout: 2000 }).catch(() => false)) {
                 const btnText = await btn.textContent().catch(() => "button");
                 await btn.click({ timeout: 3000 });
-                await page.waitForTimeout(500);
+                await page.waitForTimeout(1000);
                 const preview = await capture();
                 await smartStep(stepText,"passed", `Clicked: "${btnText?.trim()}"`, preview);
               } else {
@@ -2163,25 +2419,200 @@ Reply with ONLY the suggestion, no code.`;
           return;
         }
 
-        // Fill / Enter / Type / Input
+        // Clear field
+        if (lower.includes("clear") && (lower.includes("field") || lower.includes("input") || lower.includes("form"))) {
+          await smartStep(stepText, "running");
+          try {
+            const fieldMatch = stepText.match(/clear\s+(?:the\s+)?(.+?)(?:\s+field|\s+input|\s*$)/i);
+            const fieldHint = fieldMatch ? fieldMatch[1].trim().toLowerCase() : "";
+            let cleared = 0;
+
+            if (fieldHint && fieldHint !== "all" && fieldHint !== "form") {
+              // Clear specific field
+              const selectors = [
+                `input[name*="${fieldHint}" i]:visible`, `input[placeholder*="${fieldHint}" i]:visible`,
+                `input[type="${fieldHint}"]:visible`, `input[id*="${fieldHint}" i]:visible`,
+                `textarea[name*="${fieldHint}" i]:visible`
+              ];
+              for (const sel of selectors) {
+                const el = page.locator(sel).first();
+                if (await el.isVisible({ timeout: 1000 }).catch(() => false)) {
+                  await el.fill("");
+                  cleared++;
+                  break;
+                }
+              }
+            } else {
+              // Clear all visible inputs
+              const allInputs = page.locator("input:visible,textarea:visible");
+              const count = await allInputs.count();
+              for (let i = 0; i < count; i++) {
+                try { await allInputs.nth(i).fill(""); cleared++; } catch {}
+              }
+            }
+            const preview = await capture();
+            await smartStep(stepText, cleared > 0 ? "passed" : "failed", `Cleared ${cleared} field(s)`, preview);
+          } catch (err: any) {
+            const preview = await capture();
+            await smartStep(stepText, "failed", err.message, preview);
+          }
+          return;
+        }
+
+        // Submit form
+        if (lower.includes("submit") || (lower.includes("click") && lower.includes("submit"))) {
+          await smartStep(stepText, "running");
+          try {
+            const submitBtn = page.locator("button[type='submit']:visible, input[type='submit']:visible, button:has-text('Submit'):visible, button:has-text('Login'):visible, button:has-text('Sign in'):visible, button:has-text('Sign up'):visible, button:has-text('Register'):visible, button:has-text('Send'):visible, button:has-text('Save'):visible").first();
+            if (await submitBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+              const btnText = await submitBtn.textContent().catch(() => "Submit");
+              await submitBtn.click({ timeout: 3000 });
+              await page.waitForTimeout(1500);
+              const preview = await capture();
+              await smartStep(stepText, "passed", `Submitted via "${btnText?.trim()}"`, preview);
+            } else {
+              // Fallback: press Enter on last focused input
+              await page.keyboard.press("Enter");
+              await page.waitForTimeout(1500);
+              const preview = await capture();
+              await smartStep(stepText, "passed", "Submitted via Enter key", preview);
+            }
+          } catch (err: any) {
+            const preview = await capture();
+            await smartStep(stepText, "failed", err.message, preview);
+          }
+          return;
+        }
+
+        // Fill / Enter / Type / Input — SMART field targeting with position fallback
         if (lower.includes("fill") || lower.includes("enter") || lower.includes("type") || lower.includes("input")) {
           await smartStep(stepText,"running");
           try {
-            const inputs = page.locator("input:visible");
-            const inputCount = await inputs.count();
-            let filled = 0;
-            for (let i = 0; i < Math.min(inputCount, 4); i++) {
-              const input = inputs.nth(i);
-              const inputType = await input.getAttribute("type") || "text";
-              try {
-                if (inputType === "email") { await input.fill("test@example.com"); filled++; }
-                else if (inputType === "password") { await input.fill("password123"); filled++; }
-                else if (inputType === "search") { await input.fill("test query"); filled++; }
-                else if (["text", "tel", "url", ""].includes(inputType)) { await input.fill("Test input"); filled++; }
-              } catch {}
+            // Try to extract "Fill [field] with [value]" pattern
+            const withMatch = stepText.match(/(?:fill|enter|type|input)\s+(?:the\s+)?(?:in\s+)?(.+?)\s+(?:with|as|=|:)\s+["']?(.+?)["']?\s*$/i);
+
+            if (withMatch) {
+              const fieldHint = withMatch[1].toLowerCase().replace(/\s*(field|input|box|area)\s*/g, "").trim();
+              const value = withMatch[2].trim();
+              let filled = false;
+              let filledVia = "";
+
+              // Strategy 1: Direct attribute match (name, placeholder, id, type)
+              const directSelectors = [
+                `input[type="${fieldHint}"]:visible`, `input[name*="${fieldHint}" i]:visible`,
+                `input[placeholder*="${fieldHint}" i]:visible`, `input[id*="${fieldHint}" i]:visible`,
+                `textarea[name*="${fieldHint}" i]:visible`, `textarea[placeholder*="${fieldHint}" i]:visible`,
+              ];
+              for (const sel of directSelectors) {
+                const el = page.locator(sel).first();
+                if (await el.isVisible({ timeout: 1000 }).catch(() => false)) {
+                  await el.fill(value); filled = true; filledVia = "attribute match"; break;
+                }
+              }
+
+              // Strategy 2: Label text match — find label with fieldHint text, then its input
+              if (!filled) {
+                const label = page.locator(`label:has-text("${fieldHint}")`).first();
+                if (await label.isVisible({ timeout: 800 }).catch(() => false)) {
+                  const forAttr = await label.getAttribute("for").catch(() => "");
+                  if (forAttr) {
+                    const target = page.locator(`#${forAttr}`);
+                    if (await target.isVisible({ timeout: 800 }).catch(() => false)) { await target.fill(value); filled = true; filledVia = "label[for]"; }
+                  }
+                  if (!filled) {
+                    const inner = label.locator("input,textarea,select").first();
+                    if (await inner.isVisible({ timeout: 800 }).catch(() => false)) { await inner.fill(value); filled = true; filledVia = "label>input"; }
+                  }
+                }
+              }
+
+              // Strategy 3: Nearby text match — find any text/span/div containing the hint, then the nearest input
+              if (!filled) {
+                try {
+                  const nearbyInput = await page.evaluate((hint) => {
+                    const allText = document.querySelectorAll("label, span, div, p, h1, h2, h3, h4, h5, h6, th, dt, legend");
+                    for (const el of allText) {
+                      if ((el.textContent || "").toLowerCase().includes(hint)) {
+                        // Look for input in same parent or next sibling
+                        const parent = el.closest("div, form, fieldset, section, li, tr");
+                        if (parent) {
+                          const inp = parent.querySelector("input:not([type='hidden']):not([type='submit']):not([type='checkbox']):not([type='radio']), textarea, select") as HTMLInputElement;
+                          if (inp) return { found: true, selector: inp.id ? `#${inp.id}` : inp.name ? `input[name="${inp.name}"]` : "" };
+                        }
+                      }
+                    }
+                    return { found: false, selector: "" };
+                  }, fieldHint);
+                  if (nearbyInput.found && nearbyInput.selector) {
+                    const el = page.locator(nearbyInput.selector).first();
+                    if (await el.isVisible({ timeout: 800 }).catch(() => false)) { await el.fill(value); filled = true; filledVia = "nearby text"; }
+                  }
+                } catch {}
+              }
+
+              // Strategy 4: Position-based fallback — "email" = 1st non-password input, "password" = 1st password input
+              if (!filled) {
+                const isPasswordField = fieldHint.includes("pass") || fieldHint.includes("pwd") || fieldHint.includes("key") || fieldHint.includes("secret") || fieldHint.includes("access");
+                const isEmailField = fieldHint.includes("email") || fieldHint.includes("mail") || fieldHint.includes("user") || fieldHint.includes("operator") || fieldHint.includes("id") || fieldHint.includes("login") || fieldHint.includes("account");
+
+                if (isPasswordField) {
+                  const el = page.locator("input[type='password']:visible").first();
+                  if (await el.isVisible({ timeout: 1000 }).catch(() => false)) { await el.fill(value); filled = true; filledVia = "password position"; }
+                } else if (isEmailField) {
+                  // First try email type, then first non-password text input
+                  const emailEl = page.locator("input[type='email']:visible").first();
+                  if (await emailEl.isVisible({ timeout: 800 }).catch(() => false)) { await emailEl.fill(value); filled = true; filledVia = "email type"; }
+                  if (!filled) {
+                    const firstText = page.locator("input:visible:not([type='password']):not([type='hidden']):not([type='submit']):not([type='checkbox']):not([type='radio']):not([type='button'])").first();
+                    if (await firstText.isVisible({ timeout: 800 }).catch(() => false)) { await firstText.fill(value); filled = true; filledVia = "first text input"; }
+                  }
+                } else if (fieldHint.includes("search") || fieldHint.includes("query")) {
+                  const el = page.locator("input[type='search']:visible, input[name*='search' i]:visible, input[placeholder*='search' i]:visible").first();
+                  if (await el.isVisible({ timeout: 800 }).catch(() => false)) { await el.fill(value); filled = true; filledVia = "search"; }
+                } else if (fieldHint.includes("phone") || fieldHint.includes("mobile") || fieldHint.includes("tel")) {
+                  const el = page.locator("input[type='tel']:visible, input[name*='phone' i]:visible").first();
+                  if (await el.isVisible({ timeout: 800 }).catch(() => false)) { await el.fill(value); filled = true; filledVia = "phone"; }
+                }
+              }
+
+              // Strategy 5: Ultimate fallback — just find ANY visible unfilled input
+              if (!filled) {
+                const allInputs = page.locator("input:visible:not([type='hidden']):not([type='submit']):not([type='checkbox']):not([type='radio']):not([type='button']), textarea:visible");
+                const count = await allInputs.count();
+                for (let i = 0; i < count; i++) {
+                  const inp = allInputs.nth(i);
+                  const curVal = await inp.inputValue().catch(() => "");
+                  if (!curVal) {
+                    await inp.fill(value); filled = true; filledVia = `fallback input #${i + 1}`; break;
+                  }
+                }
+              }
+
+              const preview = await capture();
+              await smartStep(stepText, filled ? "passed" : "failed", filled ? `Filled "${fieldHint}" → "${value}" (via ${filledVia})` : `Could not find any field matching "${fieldHint}"`, preview);
+            } else {
+              // Generic fill: fill all visible inputs with smart defaults
+              const inputs = page.locator("input:visible:not([type='hidden']):not([type='submit']):not([type='checkbox']):not([type='radio']):not([type='button']),textarea:visible");
+              const inputCount = await inputs.count();
+              let filled = 0;
+              for (let i = 0; i < Math.min(inputCount, 6); i++) {
+                const input = inputs.nth(i);
+                const inputType = (await input.getAttribute("type") || "text").toLowerCase();
+                const inputName = (await input.getAttribute("name") || "").toLowerCase();
+                const inputPlaceholder = (await input.getAttribute("placeholder") || "").toLowerCase();
+                try {
+                  if (inputType === "email" || inputName.includes("email")) { await input.fill("testuser@example.com"); filled++; }
+                  else if (inputType === "password") { await input.fill("Test@12345"); filled++; }
+                  else if (inputType === "search" || inputName.includes("search")) { await input.fill("test search query"); filled++; }
+                  else if (inputType === "tel" || inputName.includes("phone")) { await input.fill("9876543210"); filled++; }
+                  else if (inputName.includes("name") || inputPlaceholder.includes("name")) { await input.fill("John Doe"); filled++; }
+                  else if (inputName.includes("url") || inputType === "url") { await input.fill("https://example.com"); filled++; }
+                  else if (["text", ""].includes(inputType)) { await input.fill("Test input data"); filled++; }
+                } catch {}
+              }
+              const preview = await capture();
+              await smartStep(stepText, filled > 0 ? "passed" : "failed", `Filled ${filled}/${Math.min(inputCount, 6)} inputs with smart defaults`, preview);
             }
-            const preview = await capture();
-            await smartStep(stepText,filled > 0 ? "passed" : "failed", `Filled ${filled}/${Math.min(inputCount, 4)} inputs`, preview);
           } catch (err: any) {
             const preview = await capture();
             await smartStep(stepText,"failed", err.message, preview);

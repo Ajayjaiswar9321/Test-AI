@@ -101,6 +101,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ previewUrl, status, ta
                             src={previewUrl}
                             alt="Live Test Feed"
                             className="w-full h-full object-contain bg-gray-50 dark:bg-slate-950"
+                            style={{ imageRendering: "auto", WebkitFontSmoothing: "antialiased" }}
                         />
                     </div>
                 )}

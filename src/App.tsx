@@ -141,6 +141,8 @@ export default function App() {
       uiPlan.length > 0 &&
       uiPlan.every(s => s.status === "passed" || s.status === "failed")
     ) {
+      // Set testReport so the full report view can render
+      if (allReports.length > 0) setTestReport(allReports[allReports.length - 1]);
       setShowFullReport(true);
     }
   }, [state.testRunning, runQueue, allReports, uiPlan]);
@@ -323,6 +325,11 @@ export default function App() {
       await new Promise(r => setTimeout(r, 800));
     }
     runAllRef.current = false;
+    // Set testReport from accumulated reports so the full report view renders
+    setAllReports((prev) => {
+      if (prev.length > 0) setTestReport(prev[prev.length - 1]);
+      return prev;
+    });
     dispatch({ type: "SET_TEST_RUNNING", payload: false });
     setShowFullReport(true);
   };
@@ -432,10 +439,7 @@ export default function App() {
 
     if (log.type === "error") runHadErrorRef.current = true;
 
-    // Auto-open chat when AI suggestion comes (test failure help)
-    if (log.type === "suggestion" && !state.isChatOpen) {
-      dispatch({ type: "TOGGLE_CHAT" });
-    }
+    // Suggestions collected silently — chat opens only after ALL tests complete
 
     // Capture generated Playwright script
     if (log.type === "script" && log.code) {
@@ -470,11 +474,11 @@ export default function App() {
         url: uiPlanUrl,
         scenarioTitle: completedScenario?.title || "UI Test",
       };
-      setTestReport(completedReport);
       setAllReports((prev) => [...prev, completedReport]);
 
-      // Save individual run to history if not part of a batch
+      // Only show individual report if not part of a batch run
       if (!runAllRef.current && runQueue.length === 0) {
+        setTestReport(completedReport);
         saveTestHistory([completedReport]);
       }
 
@@ -592,15 +596,15 @@ export default function App() {
             <form onSubmit={handleLogin} className="space-y-4">
               <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.5, duration: 0.4 }} className="space-y-2">
                 <label className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-600/60 dark:text-emerald-500/50 flex items-center gap-2 mono-label">
-                  <UserIcon size={10} /> Operator ID
+                  <UserIcon size={10} /> Email Address
                 </label>
-                <input type="text" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-gray-50 dark:bg-slate-950/50 border border-gray-200 dark:border-slate-700/50 rounded-lg p-3 md:p-4 text-sm md:text-base text-gray-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500/40 transition-all font-medium placeholder-gray-400 dark:placeholder-slate-600" placeholder="operator@system.io" />
+                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-gray-50 dark:bg-slate-950/50 border border-gray-200 dark:border-slate-700/50 rounded-lg p-3 md:p-4 text-sm md:text-base text-gray-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500/40 transition-all font-medium placeholder-gray-400 dark:placeholder-slate-600" placeholder="Enter your email" />
               </motion.div>
               <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6, duration: 0.4 }} className="space-y-2">
                 <label className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-600/60 dark:text-emerald-500/50 flex items-center gap-2 mono-label">
-                  <Lock size={10} /> Access Key
+                  <Lock size={10} /> Password
                 </label>
-                <input type="password" className="w-full bg-gray-50 dark:bg-slate-950/50 border border-gray-200 dark:border-slate-700/50 rounded-lg p-3 md:p-4 text-sm md:text-base text-gray-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500/40 transition-all font-medium placeholder-gray-400 dark:placeholder-slate-600" placeholder="••••••••" />
+                <input type="password" className="w-full bg-gray-50 dark:bg-slate-950/50 border border-gray-200 dark:border-slate-700/50 rounded-lg p-3 md:p-4 text-sm md:text-base text-gray-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500/40 transition-all font-medium placeholder-gray-400 dark:placeholder-slate-600" placeholder="Enter your password" />
               </motion.div>
               {state.error && <motion.p initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-rose-500 dark:text-rose-400 text-xs text-center font-bold px-3 py-2 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 rounded-lg mono-label">{state.error}</motion.p>}
               <motion.button
@@ -613,7 +617,7 @@ export default function App() {
                 disabled={state.loading}
                 className="w-full py-3 md:py-4 bg-emerald-500 hover:bg-emerald-400 text-white dark:text-black font-black uppercase tracking-[0.2em] text-xs rounded-lg transition-all flex items-center justify-center gap-2 mt-4 shadow-lg shadow-emerald-500/20 neon-glow mono-label"
               >
-                {state.loading ? "Authenticating..." : "Initialize System"}
+                {state.loading ? "Logging in..." : "Login"}
                 <ChevronRight size={16} />
               </motion.button>
             </form>

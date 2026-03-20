@@ -277,24 +277,6 @@ export const UiAutomationPlanner: React.FC<UiAutomationPlannerProps> = ({
               className="w-full bg-gray-50 dark:bg-slate-950/50 border border-gray-200 dark:border-slate-700/30 rounded-lg px-4 py-3 text-sm text-gray-800 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-600 outline-none ring-0 resize-none mb-3 focus:outline-none focus:ring-0 focus:border-emerald-400 dark:focus:border-emerald-500/30"
             />
 
-            {/* Suite type chips */}
-            <div className="flex items-center gap-2">
-              {(["smoke", "regression", "exploratory"] as UiSuiteType[]).map((t) => (
-                <motion.button
-                  key={t}
-                  whileHover={{ scale: 1.05, y: -1 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setSuiteType(t)}
-                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-[0.15em] transition-all border mono-label ${
-                    suiteType === t
-                      ? "bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30 shadow-sm dark:shadow-[0_0_10px_rgba(16,185,129,0.1)]"
-                      : "text-gray-400 dark:text-slate-500 border-gray-200 dark:border-slate-700/30 hover:bg-gray-50 dark:hover:bg-slate-800/50 hover:text-gray-700 dark:hover:text-slate-300"
-                  }`}
-                >
-                  {t}
-                </motion.button>
-              ))}
-            </div>
           </div>
         </motion.div>
 
