@@ -1,33 +1,52 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Test AI - AI-Powered QA Automation Engine
 
-# Run and deploy your AI Studio app
+AI-powered test automation platform that dynamically analyzes websites and generates comprehensive functional test cases — positive, negative, and security tests.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/48a5274f-4efe-4634-a88c-480049174f47
+- **Dynamic Page Analysis** — Crawls target URL, detects forms, fields, labels, page type
+- **Smart Functional Testing** — Fills forms, clicks buttons, tests login flows, validates errors
+- **Positive + Negative Tests** — Valid data, empty fields, invalid formats, wrong credentials
+- **Security Testing** — SQL injection, XSS attack detection
+- **HD Live Preview** — Watch tests run in real-time with 2x resolution
+- **AI Chatbot** — Gemini-powered test analysis and debugging assistant
+- **Test Reports** — Detailed reports with pass/fail, screenshots, CSV export
+- **One-Click Deploy** — Docker-ready for Render deployment
 
-## Run Locally
+## Tech Stack
 
-**Prerequisites:**  Node.js
+- **Frontend**: React 19, Vite, Tailwind CSS, Framer Motion
+- **Backend**: Express.js, TypeScript
+- **Testing**: Playwright (headless Chromium)
+- **AI**: Google Gemini 1.5 Flash (free tier)
+- **Database**: SQLite (local) / Supabase (cloud)
 
+## Quick Start
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+npm install
+npm run dev
+```
 
-## Optional: Use Supabase Instead of Local SQLite
+App runs at `http://localhost:3000`
 
-By default, this app stores users/test runs in local `bro_testing.db` (SQLite).
-To switch to Supabase:
+## Environment Variables
 
-1. Run `supabase/schema.sql` in your Supabase SQL Editor
-2. Add env vars:
-   - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-3. Restart the server (`npm run dev`)
+Create a `.env` file:
 
-When both vars are set, the backend automatically uses Supabase.
+```
+GEMINI_API_KEY=your_gemini_api_key
+```
+
+Get a free API key at [aistudio.google.com](https://aistudio.google.com)
+
+## Deploy on Render
+
+1. Push to GitHub
+2. Connect repo on [render.com](https://render.com)
+3. Set `GEMINI_API_KEY` in environment variables
+4. Deploy (uses Dockerfile automatically)
+
+## License
+
+MIT
