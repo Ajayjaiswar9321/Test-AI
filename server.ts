@@ -1596,10 +1596,17 @@ class SupabaseStore implements DataStore {
   }
 }
 
+// Ensure data directory exists for SQLite in production
+const dbPath = process.env.NODE_ENV === "production" ? "/app/data/bro_testing.db" : "bro_testing.db";
+if (process.env.NODE_ENV === "production") {
+  const dbDir = path.dirname(dbPath);
+  if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+}
+
 const store: DataStore =
   SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
     ? new SupabaseStore(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-    : new SqliteStore(new Database(process.env.NODE_ENV === "production" ? "/app/data/bro_testing.db" : "bro_testing.db"));
+    : new SqliteStore(new Database(dbPath));
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));

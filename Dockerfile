@@ -38,6 +38,9 @@ COPY . .
 # Build frontend
 RUN npm run build
 
+# Create required directories
+RUN mkdir -p /app/data /app/workspace/generated /app/test-results
+
 # Expose port
 EXPOSE 3000
 
