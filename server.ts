@@ -1726,6 +1726,181 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+// Parse Postman collection into structured endpoints
+app.post("/api/parse-collection", authenticate, async (req, res) => {
+  const { collection } = req.body;
+  if (!collection || !collection.item) {
+    return res.status(400).json({ error: "Invalid Postman collection" });
+  }
+
+  function flattenItems(items: any[], folder = "Default"): any[] {
+    const result: any[] = [];
+    for (const item of items) {
+      if (item.request) {
+        result.push({ ...item, _folder: folder });
+      } else if (item.item) {
+        result.push(...flattenItems(item.item, item.name || folder));
+      }
+    }
+    return result;
+  }
+
+  const flatItems = flattenItems(collection.item, collection.info?.name || "Collection");
+  if (flatItems.length === 0) {
+    return res.status(400).json({ error: "No API requests found" });
+  }
+
+  const endpoints = flatItems.map((item: any, i: number) => {
+    const req = item.request;
+    const rawUrl = typeof req.url === "string" ? req.url : req.url?.raw || "";
+    const headers: Record<string, string> = {};
+    if (Array.isArray(req.header)) {
+      for (const h of req.header) {
+        if (h.key && h.value && !h.disabled) headers[h.key] = h.value;
+      }
+    }
+    return {
+      id: `ep_${Date.now()}_${i}`,
+      name: item.name || `Request ${i + 1}`,
+      method: (req.method || "GET").toUpperCase(),
+      url: rawUrl,
+      headers,
+      body: req.body?.raw || "",
+      folder: item._folder || "Default",
+      status: "idle",
+    };
+  });
+
+  res.json({ endpoints, summary: `Parsed ${endpoints.length} endpoints from collection.` });
+});
+
+// Parse cURL command into endpoint
+app.post("/api/parse-curl", authenticate, async (req, res) => {
+  const { curl } = req.body;
+  if (!curl || !curl.trim()) {
+    return res.status(400).json({ error: "cURL command is required" });
+  }
+
+  try {
+    const cleaned = curl.replace(/\\\n/g, " ").replace(/\\\r\n/g, " ").trim();
+    let method = "GET";
+    let url = "";
+    const headers: Record<string, string> = {};
+    let body = "";
+
+    // Extract method
+    const methodMatch = cleaned.match(/-X\s+(\w+)/i);
+    if (methodMatch) method = methodMatch[1].toUpperCase();
+
+    // Extract URL
+    const urlMatch = cleaned.match(/curl\s+(?:.*?\s+)?['"]?(https?:\/\/[^\s'"]+)['"]?/i) ||
+                     cleaned.match(/['"]?(https?:\/\/[^\s'"]+)['"]?/);
+    if (urlMatch) url = urlMatch[1].replace(/['"]$/, "");
+
+    // Extract headers
+    const headerMatches = cleaned.matchAll(/-H\s+['"]([^'"]+)['"]/gi);
+    for (const m of headerMatches) {
+      const [key, ...valueParts] = m[1].split(":");
+      if (key && valueParts.length) headers[key.trim()] = valueParts.join(":").trim();
+    }
+
+    // Extract body
+    const bodyMatch = cleaned.match(/-d\s+['"](.+?)['"]/s) || cleaned.match(/--data(?:-raw)?\s+['"](.+?)['"]/s);
+    if (bodyMatch) {
+      body = bodyMatch[1];
+      if (!methodMatch) method = "POST"; // Default to POST if body present
+    }
+
+    if (!url) {
+      return res.status(400).json({ error: "Could not parse URL from cURL command" });
+    }
+
+    // Generate name from URL
+    const urlParts = new URL(url);
+    const pathName = urlParts.pathname.split("/").filter(Boolean).slice(-2).join("/") || urlParts.hostname;
+
+    const endpoint = {
+      id: `ep_${Date.now()}`,
+      name: `${method} ${pathName}`,
+      method,
+      url,
+      headers,
+      body,
+      folder: "cURL Import",
+      status: "idle",
+    };
+
+    res.json({ endpoint });
+  } catch (err: any) {
+    res.status(400).json({ error: "Failed to parse cURL: " + err.message });
+  }
+});
+
+// Run single API test
+app.post("/api/run-api-test", authenticate, async (req, res) => {
+  const { endpoint } = req.body;
+  if (!endpoint || !endpoint.url) {
+    return res.status(400).json({ error: "Endpoint with URL is required" });
+  }
+
+  try {
+    const startTime = Date.now();
+    const fetchHeaders: Record<string, string> = { ...endpoint.headers };
+
+    const fetchOptions: any = {
+      method: endpoint.method || "GET",
+      headers: fetchHeaders,
+    };
+
+    if (endpoint.body && ["POST", "PUT", "PATCH"].includes(endpoint.method)) {
+      fetchOptions.body = endpoint.body;
+      if (!fetchHeaders["Content-Type"]) fetchHeaders["Content-Type"] = "application/json";
+    }
+
+    const apiRes = await fetch(endpoint.url, fetchOptions);
+    const responseTime = Date.now() - startTime;
+    let responseBody = "";
+    try {
+      responseBody = await apiRes.text();
+      // Try to pretty-print JSON
+      const parsed = JSON.parse(responseBody);
+      responseBody = JSON.stringify(parsed, null, 2);
+    } catch {}
+
+    const passed = apiRes.ok; // 2xx = passed
+    const response = {
+      statusCode: apiRes.status,
+      body: responseBody,
+      time: responseTime,
+      size: new TextEncoder().encode(responseBody).length,
+    };
+
+    // AI analysis of the response
+    let aiNotes = "";
+    if (GEMINI_KEY) {
+      try {
+        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const result = await model.generateContent(
+          `Analyze this API response in 1-2 sentences. Method: ${endpoint.method} ${endpoint.url}. Status: ${apiRes.status}. Response (first 500 chars): ${responseBody.substring(0, 500)}. Say if the response looks correct, any issues, data quality.`
+        );
+        aiNotes = result.response.text().trim();
+      } catch {}
+    }
+    if (!aiNotes) {
+      if (passed) aiNotes = `${apiRes.status} OK — Response received in ${responseTime}ms, ${(response.size / 1024).toFixed(1)} KB payload.`;
+      else aiNotes = `${apiRes.status} Error — API returned non-success status. Check the response body for error details.`;
+    }
+
+    res.json({ passed, response, aiNotes });
+  } catch (err: any) {
+    res.json({
+      passed: false,
+      response: { statusCode: 0, body: `Network Error: ${err.message}`, time: 0, size: 0 },
+      aiNotes: `Request failed: ${err.message}. Check if the URL is correct and the server is reachable.`,
+    });
+  }
+});
+
 app.post("/api/import-postman", authenticate, async (req, res) => {
   const { collection } = req.body;
   if (!collection || !collection.item) {

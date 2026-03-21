@@ -22,6 +22,7 @@ import { ConsoleStream, type StreamLog } from "./components/ConsoleStream";
 import { SidebarFixChat } from "./components/SidebarFixChat";
 import { CodeViewer } from "./components/CodeViewer";
 import { UploadPostman } from "./components/UploadPostman";
+import { ApiTestingPanel } from "./components/ApiTestingPanel";
 import { UiAutomationPlanner, type UiPlanInput, type UiPlanScenario } from "./components/UiAutomationPlanner";
 import { LivePreview } from "./components/LivePreview";
 import { Logo, LogoMark } from "./components/Logo";
@@ -702,8 +703,8 @@ export default function App() {
                     <TestHistory token={state.token || ""} onAuthError={handleAuthFailure} />
                   </motion.div>
                 ) : state.activeTab === "api" ? (
-                  <motion.div key="api" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="flex-1 flex flex-col gap-6 min-h-0">
-                    {!state.apiCode ? <UploadPostman onImport={handleImportPostman} loading={state.loading} /> : <CodeViewer code={state.apiCode} filename="api_tests.spec.ts" />}
+                  <motion.div key="api" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="flex-1 flex flex-col min-h-0">
+                    <ApiTestingPanel token={state.token || ""} onAuthError={handleAuthFailure} />
                   </motion.div>
                 ) : (
                   <motion.div key="ui" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="flex-1 flex flex-col min-h-0">
