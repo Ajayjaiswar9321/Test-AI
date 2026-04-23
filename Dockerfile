@@ -38,8 +38,9 @@ COPY . .
 # Build frontend
 RUN npm run build
 
-# Create required directories
-RUN mkdir -p /app/data /app/workspace/generated /app/test-results
+# Create required directories and fix shared memory for Chromium
+RUN mkdir -p /app/data /app/workspace/generated /app/test-results && \
+    chmod -R 777 /app/data /app/workspace /app/test-results
 
 # Expose port
 EXPOSE 3000

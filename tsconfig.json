@@ -1,5 +1,5 @@
 {
-  "exclude": ["workspace/**", "node_modules", "dist"],
+  "exclude": ["workspace/**", "node_modules", "dist", "test-platform/**"],
   "compilerOptions": {
     "target": "ES2022",
     "experimentalDecorators": true,

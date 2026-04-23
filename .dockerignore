@@ -10,5 +10,10 @@ workspace
 .DS_Store
 .agent
 .gemini
+.claude
+.qlaude
+.kilocode
+.vercel
 test-platform
 tests
+WORK-LOG-*.md

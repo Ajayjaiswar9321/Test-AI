@@ -255,7 +255,7 @@ export const UiAutomationPlanner: React.FC<UiAutomationPlannerProps> = ({
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="https://target-app.com"
-                className="flex-1 bg-transparent text-sm text-gray-800 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-600 outline-none ring-0 font-medium focus:outline-none focus:ring-0"
+                className="flex-1 bg-transparent text-base md:text-sm text-gray-800 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-600 outline-none ring-0 font-medium focus:outline-none focus:ring-0"
               />
               <motion.button
                 whileHover={{ scale: 1.1 }}
@@ -274,7 +274,7 @@ export const UiAutomationPlanner: React.FC<UiAutomationPlannerProps> = ({
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) handleKeyDown(e); }}
               rows={3}
               placeholder="Describe test objective or paste test case..."
-              className="w-full bg-gray-50 dark:bg-slate-950/50 border border-gray-200 dark:border-slate-700/30 rounded-lg px-4 py-3 text-sm text-gray-800 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-600 outline-none ring-0 resize-none mb-3 focus:outline-none focus:ring-0 focus:border-emerald-400 dark:focus:border-emerald-500/30"
+              className="w-full bg-gray-50 dark:bg-slate-950/50 border border-gray-200 dark:border-slate-700/30 rounded-lg px-4 py-3 text-base md:text-sm text-gray-800 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-600 outline-none ring-0 resize-none mb-3 focus:outline-none focus:ring-0 focus:border-emerald-400 dark:focus:border-emerald-500/30"
             />
 
           </div>

@@ -144,7 +144,7 @@ export const SidebarFixChat: React.FC<SidebarFixChatProps> = ({
           </span>
         </div>
         {onClose && (
-          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 dark:text-slate-500 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-all">
+          <button onClick={onClose} aria-label="Close chat" className="w-9 h-9 flex items-center justify-center rounded-lg text-gray-400 dark:text-slate-500 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 active:scale-95 transition-all">
             <X size={16} />
           </button>
         )}
@@ -264,7 +264,7 @@ export const SidebarFixChat: React.FC<SidebarFixChatProps> = ({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSend())}
             placeholder="Ask anything about testing..."
-            className="flex-1 bg-transparent border-none px-2 py-2 text-sm text-gray-800 dark:text-slate-200 focus:outline-none focus:ring-0 resize-none max-h-28 min-h-[36px] leading-relaxed placeholder-gray-400 dark:placeholder-slate-600"
+            className="flex-1 bg-transparent border-none px-2 py-2 text-base md:text-sm text-gray-800 dark:text-slate-200 focus:outline-none focus:ring-0 resize-none max-h-28 min-h-[36px] leading-relaxed placeholder-gray-400 dark:placeholder-slate-600"
             rows={1}
           />
           <motion.button

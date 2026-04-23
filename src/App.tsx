@@ -22,7 +22,7 @@ import { ConsoleStream, type StreamLog } from "./components/ConsoleStream";
 import { SidebarFixChat } from "./components/SidebarFixChat";
 import { CodeViewer } from "./components/CodeViewer";
 import { UploadPostman } from "./components/UploadPostman";
-import { ApiTestingPanel } from "./components/ApiTestingPanel";
+import { ApiTestingPanel, AgentSuiteResult } from "./components/ApiTestingPanel";
 import { UiAutomationPlanner, type UiPlanInput, type UiPlanScenario } from "./components/UiAutomationPlanner";
 import { LivePreview } from "./components/LivePreview";
 import { Logo, LogoMark } from "./components/Logo";
@@ -387,6 +387,46 @@ export default function App() {
     } catch {}
   };
 
+  const saveApiSuiteToHistory = async (suiteResult: AgentSuiteResult) => {
+    if (!state.token) return;
+    const { lister } = suiteResult;
+    // Pull a base URL from the first endpoint for the history card title
+    const firstUrl = lister.list[0]?.url || "";
+    let baseUrl = "API Suite";
+    try { baseUrl = new URL(firstUrl).origin; } catch {}
+    const status = lister.totalFailed > 0 ? "failed" : lister.totalWarning > 0 ? "warning" : "passed";
+    const summary = JSON.stringify({
+      type: "api",
+      endpoints: lister.list.map(e => ({
+        name: e.name,
+        method: e.method,
+        url: e.url,
+        statusCode: e.statusCode,
+        time: e.time,
+        verdict: e.verdict,
+        notes: e.notes,
+      })),
+      totalEndpoints: lister.totalEndpoints,
+      totalPassed: lister.totalPassed,
+      totalWarning: lister.totalWarning,
+      totalFailed: lister.totalFailed,
+      avgTime: lister.avgTime,
+      recommendations: lister.recommendations,
+    });
+    try {
+      await fetch("/api/test-history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+        body: JSON.stringify({
+          id: `api_${Date.now()}`,
+          url: baseUrl,
+          status,
+          summary,
+        }),
+      });
+    } catch {}
+  };
+
   const handleRunUiScenario = async (scenarioId: string, url: string) => {
     const effectiveUrl = url || uiPlanUrl;
     const scenario = uiPlan.find((item) => item.id === scenarioId);
@@ -599,7 +639,7 @@ export default function App() {
                 <label className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-600/60 dark:text-emerald-500/50 flex items-center gap-2 mono-label">
                   <UserIcon size={10} /> Email Address
                 </label>
-                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-gray-50 dark:bg-slate-950/50 border border-gray-200 dark:border-slate-700/50 rounded-lg p-3 md:p-4 text-sm md:text-base text-gray-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500/40 transition-all font-medium placeholder-gray-400 dark:placeholder-slate-600" placeholder="Enter your email" />
+                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-gray-50 dark:bg-slate-950/50 border border-gray-200 dark:border-slate-700/50 rounded-lg p-3 md:p-4 text-base text-gray-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500/40 transition-all font-medium placeholder-gray-400 dark:placeholder-slate-600" placeholder="Enter your email" />
               </motion.div>
               <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6, duration: 0.4 }} className="space-y-2">
                 <label className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-600/60 dark:text-emerald-500/50 flex items-center gap-2 mono-label">
@@ -704,7 +744,7 @@ export default function App() {
                   </motion.div>
                 ) : state.activeTab === "api" ? (
                   <motion.div key="api" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="flex-1 flex flex-col min-h-0">
-                    <ApiTestingPanel token={state.token || ""} onAuthError={handleAuthFailure} />
+                    <ApiTestingPanel token={state.token || ""} onAuthError={handleAuthFailure} onSuiteComplete={saveApiSuiteToHistory} />
                   </motion.div>
                 ) : (
                   <motion.div key="ui" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="flex-1 flex flex-col min-h-0">
@@ -722,7 +762,7 @@ export default function App() {
                       <UiAutomationPlanner planning={uiPlanLoading} scenarios={uiPlan} helperText={uiPlanSummary} initialUrl={uiPlanUrl} onGeneratePlan={handleGenerateUiPlan} onRunScenario={handleRunUiScenario} onRunAll={handleStartRunQueue} onStop={handleStopTest} runQueue={runQueue} onApproveNext={handleApproveNext} onApproveAll={handleApproveAll} onCancelQueue={handleCancelQueue} onResetPlan={() => { setUiPlan([]); setUiPlanSummary(null); setUiPlanUrl(""); setTestReport(null); setAllReports([]); setGeneratedScript(null); setBottomTab("steps"); activeScenarioRef.current = null; runAllRef.current = false; setRunQueue([]); dispatch({ type: "SET_RUN_ID", payload: null }); dispatch({ type: "SET_PREVIEW_URL", payload: null }); dispatch({ type: "SET_UI_CODE", payload: "" }); dispatch({ type: "SET_TEST_RUNNING", payload: false }); setChatAutoMessage(null); setChatResetKey(k => k + 1); }} />
                     ) : (
                       <div className="flex-1 flex flex-col md:flex-row gap-3 md:gap-6 min-h-0">
-                        <div className="w-full md:w-[380px] shrink-0 min-h-0 max-h-[45vh] md:max-h-none">
+                        <div className="w-full md:w-[380px] shrink-0 min-h-0 max-h-[65vh] md:max-h-none">
                           <UiAutomationPlanner planning={uiPlanLoading} scenarios={uiPlan} helperText={uiPlanSummary} initialUrl={uiPlanUrl} onGeneratePlan={handleGenerateUiPlan} onRunScenario={handleRunUiScenario} onRunAll={handleStartRunQueue} onStop={handleStopTest} runQueue={runQueue} onApproveNext={handleApproveNext} onApproveAll={handleApproveAll} onCancelQueue={handleCancelQueue} onResetPlan={() => { setUiPlan([]); setUiPlanSummary(null); setUiPlanUrl(""); setTestReport(null); setAllReports([]); setGeneratedScript(null); setBottomTab("steps"); activeScenarioRef.current = null; runAllRef.current = false; setRunQueue([]); dispatch({ type: "SET_RUN_ID", payload: null }); dispatch({ type: "SET_PREVIEW_URL", payload: null }); dispatch({ type: "SET_UI_CODE", payload: "" }); dispatch({ type: "SET_TEST_RUNNING", payload: false }); setChatAutoMessage(null); setChatResetKey(k => k + 1); }} />
                         </div>
                         <div className="flex-1 flex flex-col gap-3 min-w-0">
@@ -791,7 +831,7 @@ export default function App() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.9 }}
             transition={{ type: "spring", stiffness: 400, damping: 25 }}
-            className="fixed bottom-20 right-3 md:bottom-24 md:right-6 z-50 w-[92vw] max-w-[480px] h-[75vh] md:h-[80vh] max-h-[720px] rounded-xl shadow-2xl shadow-black/20 dark:shadow-black/40 border border-gray-200 dark:border-emerald-500/20 overflow-hidden neon-border"
+            className="fixed inset-x-3 bottom-20 md:inset-x-auto md:bottom-24 md:right-6 z-50 md:w-[92vw] md:max-w-[480px] h-[72vh] md:h-[80vh] max-h-[720px] rounded-xl shadow-2xl shadow-black/20 dark:shadow-black/40 border border-gray-200 dark:border-emerald-500/20 overflow-hidden neon-border"
           >
             <SidebarFixChat
               key={chatResetKey}

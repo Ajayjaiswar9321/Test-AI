@@ -2,7 +2,8 @@ import React, { useState, useRef } from "react";
 import {
   Upload, Play, FolderOpen, ChevronDown, ChevronRight,
   CheckCircle2, AlertCircle, Clock, Copy, Check,
-  FileJson, Terminal, Loader2, X, Plus, Trash2
+  FileJson, Terminal, Loader2, X, Plus, Trash2,
+  Bot, ShieldCheck, ListChecks, Sparkles
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -27,6 +28,35 @@ export interface ApiEndpoint {
 interface ApiTestingPanelProps {
   token: string;
   onAuthError?: () => void;
+  onSuiteComplete?: (suite: AgentSuiteResult, endpoints: ApiEndpoint[]) => void;
+}
+
+type AgentPhase = "idle" | "tester" | "validator" | "lister" | "done";
+
+interface AgentListItem {
+  id: string;
+  name: string;
+  method: string;
+  url: string;
+  statusCode: number;
+  time: number;
+  size: number;
+  verdict: "proper" | "warning" | "broken";
+  notes: string;
+}
+
+export interface AgentSuiteResult {
+  tester: Array<{ id: string; name: string; method: string; url: string; passed: boolean; response: { statusCode: number; body: string; time: number; size: number }; error?: string }>;
+  validator: Array<{ id: string; verdict: "proper" | "warning" | "broken"; checks: Array<{ label: string; ok: boolean; note?: string }>; notes: string }>;
+  lister: {
+    list: AgentListItem[];
+    totalPassed: number;
+    totalWarning: number;
+    totalFailed: number;
+    totalEndpoints: number;
+    avgTime: number;
+    recommendations: string[];
+  };
 }
 
 const METHOD_COLORS: Record<string, string> = {
@@ -44,7 +74,7 @@ const StatusBadge: React.FC<{ status?: string }> = ({ status }) => {
   return <AlertCircle size={12} className="text-rose-500" />;
 };
 
-export const ApiTestingPanel: React.FC<ApiTestingPanelProps> = ({ token, onAuthError }) => {
+export const ApiTestingPanel: React.FC<ApiTestingPanelProps> = ({ token, onAuthError, onSuiteComplete }) => {
   const [endpoints, setEndpoints] = useState<ApiEndpoint[]>([]);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [selectedEndpoint, setSelectedEndpoint] = useState<string | null>(null);
@@ -53,6 +83,8 @@ export const ApiTestingPanel: React.FC<ApiTestingPanelProps> = ({ token, onAuthE
   const [curlInput, setCurlInput] = useState("");
   const [showCurlInput, setShowCurlInput] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [agentPhase, setAgentPhase] = useState<AgentPhase>("idle");
+  const [suite, setSuite] = useState<AgentSuiteResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -138,6 +170,55 @@ export const ApiTestingPanel: React.FC<ApiTestingPanelProps> = ({ token, onAuthE
     setTesting(false);
   };
 
+  const runAgentPipeline = async () => {
+    if (endpoints.length === 0) return;
+    setTesting(true);
+    setSuite(null);
+    setAgentPhase("tester");
+    // Mark all rows as running so the list reflects agent-1 activity
+    setEndpoints(prev => prev.map(e => ({ ...e, status: "running", response: undefined, aiNotes: undefined })));
+
+    try {
+      const res = await fetch("/api/run-api-agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ endpoints }),
+      });
+      if (res.status === 401) { onAuthError?.(); return; }
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      const data: AgentSuiteResult = await res.json();
+
+      // Stage the UI so the user sees each agent advance sequentially
+      setAgentPhase("validator");
+      await new Promise(r => setTimeout(r, 350));
+      setAgentPhase("lister");
+      await new Promise(r => setTimeout(r, 350));
+
+      // Merge executor + validator output back into the endpoint rows
+      const validatorById = new Map(data.validator.map(v => [v.id, v]));
+      setEndpoints(prev => prev.map(e => {
+        const t = data.tester.find(x => x.id === e.id || x.url === e.url);
+        const v = t ? validatorById.get(t.id) : undefined;
+        if (!t) return { ...e, status: "idle" };
+        return {
+          ...e,
+          status: v?.verdict === "proper" ? "passed" : "failed",
+          response: t.response,
+          aiNotes: v?.notes || "",
+        };
+      }));
+      setSuite(data);
+      setAgentPhase("done");
+      onSuiteComplete?.(data, endpoints);
+    } catch (err: any) {
+      alert("Agent pipeline failed: " + err.message);
+      setAgentPhase("idle");
+      setEndpoints(prev => prev.map(e => ({ ...e, status: "idle" })));
+    } finally {
+      setTesting(false);
+    }
+  };
+
   const removeEndpoint = (id: string) => {
     setEndpoints(prev => prev.filter(e => e.id !== id));
     if (selectedEndpoint === id) setSelectedEndpoint(null);
@@ -220,7 +301,7 @@ export const ApiTestingPanel: React.FC<ApiTestingPanelProps> = ({ token, onAuthE
                 value={curlInput}
                 onChange={e => setCurlInput(e.target.value)}
                 placeholder={"curl -X GET https://api.example.com/users \\\n  -H 'Authorization: Bearer token'"}
-                className="w-full h-28 bg-gray-50 dark:bg-slate-950/50 border border-gray-200 dark:border-slate-700/30 rounded-xl p-3 text-xs text-gray-800 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-600 font-mono resize-none focus:outline-none focus:border-emerald-400"
+                className="w-full h-28 bg-gray-50 dark:bg-slate-950/50 border border-gray-200 dark:border-slate-700/30 rounded-xl p-3 text-base md:text-xs text-gray-800 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-600 font-mono resize-none focus:outline-none focus:border-emerald-400"
               />
               <div className="flex gap-2 mt-2">
                 <button onClick={handleCurlImport} disabled={!curlInput.trim() || importing} className="flex-1 py-2 rounded-lg bg-emerald-500 text-white dark:text-black text-[9px] font-black uppercase tracking-[0.15em] disabled:opacity-50 mono-label">
@@ -237,10 +318,14 @@ export const ApiTestingPanel: React.FC<ApiTestingPanelProps> = ({ token, onAuthE
     );
   }
 
+  // Mobile view switching: show list OR detail/suite, not both.
+  // Desktop (md:) always shows both side-by-side.
+  const showDetailOnMobile = !!selectedEndpoint || !!suite || agentPhase !== "idle";
+
   return (
     <div className="flex-1 flex flex-col md:flex-row gap-3 md:gap-4 min-h-0">
       {/* Left: Endpoint List */}
-      <div className="w-full md:w-[340px] shrink-0 flex flex-col bg-white dark:bg-slate-950 border border-gray-200 dark:border-emerald-500/10 rounded-xl overflow-hidden neon-border">
+      <div className={`w-full md:w-[340px] shrink-0 flex-col bg-white dark:bg-slate-950 border border-gray-200 dark:border-emerald-500/10 rounded-xl overflow-hidden neon-border ${showDetailOnMobile ? "hidden md:flex" : "flex"}`}>
         {/* Header */}
         <div className="px-3 py-2.5 bg-gray-50 dark:bg-slate-900/80 border-b border-gray-200 dark:border-emerald-500/10 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
@@ -314,13 +399,21 @@ export const ApiTestingPanel: React.FC<ApiTestingPanelProps> = ({ token, onAuthE
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.95 }}
+            onClick={runAgentPipeline}
+            disabled={testing || endpoints.length === 0}
+            className="w-full py-3 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-white dark:text-black text-[9px] font-black uppercase tracking-[0.15em] flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 disabled:opacity-40 neon-glow mono-label"
+          >
+            {testing ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+            {testing ? "Agents Running..." : "Run with AI Agents"}
+          </motion.button>
+          <button
             onClick={runAllTests}
             disabled={testing || endpoints.length === 0}
-            className="w-full py-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white dark:text-black text-[9px] font-black uppercase tracking-[0.15em] flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 disabled:opacity-40 neon-glow mono-label"
+            className="w-full py-2 rounded-lg border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[8px] font-black uppercase tracking-[0.15em] flex items-center justify-center gap-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 disabled:opacity-40 mono-label"
           >
-            {testing ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} fill="currentColor" />}
-            {testing ? "Testing APIs..." : "Run All Tests"}
-          </motion.button>
+            <Play size={10} />
+            Quick Run (no AI)
+          </button>
           <button
             onClick={() => setShowCurlInput(!showCurlInput)}
             className="w-full py-2 rounded-lg border border-gray-200 dark:border-slate-700/30 text-gray-500 dark:text-slate-400 text-[8px] font-black uppercase tracking-[0.15em] flex items-center justify-center gap-1.5 hover:bg-gray-100 dark:hover:bg-slate-800/50 mono-label"
@@ -336,13 +429,13 @@ export const ApiTestingPanel: React.FC<ApiTestingPanelProps> = ({ token, onAuthE
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-20 bg-white dark:bg-slate-950 p-4 flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-black uppercase tracking-[0.15em] text-gray-600 dark:text-slate-300 mono-label">Paste cURL</span>
-                <button onClick={() => setShowCurlInput(false)} className="p-1 text-gray-400 hover:text-rose-500"><X size={14} /></button>
+                <button onClick={() => setShowCurlInput(false)} aria-label="Close cURL input" className="w-9 h-9 flex items-center justify-center rounded-lg text-gray-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 active:scale-95 transition-all"><X size={14} /></button>
               </div>
               <textarea
                 value={curlInput}
                 onChange={e => setCurlInput(e.target.value)}
                 placeholder={"curl -X POST https://api.example.com/login \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"email\":\"test@test.com\"}'"}
-                className="flex-1 bg-gray-50 dark:bg-slate-900/50 border border-gray-200 dark:border-slate-700/30 rounded-lg p-3 text-xs text-gray-800 dark:text-slate-200 font-mono resize-none focus:outline-none focus:border-emerald-400"
+                className="flex-1 bg-gray-50 dark:bg-slate-900/50 border border-gray-200 dark:border-slate-700/30 rounded-lg p-3 text-base md:text-xs text-gray-800 dark:text-slate-200 font-mono resize-none focus:outline-none focus:border-emerald-400"
               />
               <button onClick={handleCurlImport} disabled={!curlInput.trim()} className="py-2.5 rounded-lg bg-emerald-500 text-white dark:text-black text-[9px] font-black uppercase tracking-[0.15em] disabled:opacity-50 mono-label">
                 Import
@@ -353,7 +446,99 @@ export const ApiTestingPanel: React.FC<ApiTestingPanelProps> = ({ token, onAuthE
       </div>
 
       {/* Right: Endpoint Details & Response */}
-      <div className="flex-1 flex flex-col min-w-0 gap-3">
+      <div className={`flex-1 flex-col min-w-0 gap-3 ${showDetailOnMobile ? "flex" : "hidden md:flex"}`}>
+        {/* Mobile-only back button to return to endpoint list */}
+        <button
+          onClick={() => { setSelectedEndpoint(null); setSuite(null); setAgentPhase("idle"); }}
+          className="md:hidden flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-900/50 border border-gray-200 dark:border-slate-700/30 text-gray-600 dark:text-slate-400 text-[10px] font-black uppercase tracking-[0.15em] self-start mono-label active:scale-95 transition-transform"
+        >
+          <ChevronRight size={12} className="rotate-180" />
+          Back to list
+        </button>
+        {/* Agent pipeline strip — visible while agents run OR when a suite is loaded */}
+        {(agentPhase !== "idle" || suite) && (
+          <div className="bg-white dark:bg-slate-950 border border-cyan-500/20 rounded-xl p-3 neon-border">
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles size={12} className="text-cyan-500" />
+              <span className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-600/60 dark:text-cyan-400/60 mono-label">AI Agent Pipeline</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { id: "tester", label: "Tester", desc: "Executes requests", icon: Bot },
+                { id: "validator", label: "Validator", desc: "Checks correctness", icon: ShieldCheck },
+                { id: "lister", label: "Lister", desc: "Builds summary", icon: ListChecks },
+              ] as const).map((a) => {
+                const order = ["tester", "validator", "lister", "done"];
+                const idx = order.indexOf(agentPhase);
+                const myIdx = order.indexOf(a.id);
+                const active = idx === myIdx;
+                const complete = idx > myIdx || agentPhase === "done";
+                const Icon = a.icon;
+                return (
+                  <div
+                    key={a.id}
+                    className={`rounded-lg p-2 border flex flex-col gap-1 transition-all ${
+                      complete
+                        ? "border-emerald-500/40 bg-emerald-500/5"
+                        : active
+                        ? "border-cyan-500/50 bg-cyan-500/5"
+                        : "border-gray-200 dark:border-slate-700/30 bg-gray-50 dark:bg-slate-900/30"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      {active ? (
+                        <Loader2 size={10} className="animate-spin text-cyan-500" />
+                      ) : complete ? (
+                        <CheckCircle2 size={10} className="text-emerald-500" />
+                      ) : (
+                        <Icon size={10} className="text-gray-400 dark:text-slate-500" />
+                      )}
+                      <span className={`text-[9px] font-black uppercase tracking-[0.15em] mono-label ${
+                        complete ? "text-emerald-600 dark:text-emerald-400" : active ? "text-cyan-600 dark:text-cyan-400" : "text-gray-500 dark:text-slate-500"
+                      }`}>{a.label}</span>
+                    </div>
+                    <span className="text-[9px] text-gray-400 dark:text-slate-500">{a.desc}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Lister summary */}
+            {suite && agentPhase === "done" && (
+              <div className="mt-3 pt-3 border-t border-gray-200 dark:border-slate-700/30 space-y-2">
+                <div className="grid grid-cols-4 gap-2">
+                  <div className="rounded-lg p-2 bg-gray-50 dark:bg-slate-900/50 border border-gray-200 dark:border-slate-700/30 text-center">
+                    <div className="text-[8px] text-gray-400 dark:text-slate-500 font-black uppercase tracking-[0.15em] mono-label">Total</div>
+                    <div className="text-sm font-black text-gray-800 dark:text-slate-200">{suite.lister.totalEndpoints}</div>
+                  </div>
+                  <div className="rounded-lg p-2 bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/20 text-center">
+                    <div className="text-[8px] text-emerald-600 font-black uppercase tracking-[0.15em] mono-label">Proper</div>
+                    <div className="text-sm font-black text-emerald-600 dark:text-emerald-400">{suite.lister.totalPassed}</div>
+                  </div>
+                  <div className="rounded-lg p-2 bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/20 text-center">
+                    <div className="text-[8px] text-amber-600 font-black uppercase tracking-[0.15em] mono-label">Warning</div>
+                    <div className="text-sm font-black text-amber-600 dark:text-amber-400">{suite.lister.totalWarning}</div>
+                  </div>
+                  <div className="rounded-lg p-2 bg-rose-50 dark:bg-rose-500/5 border border-rose-200 dark:border-rose-500/20 text-center">
+                    <div className="text-[8px] text-rose-600 font-black uppercase tracking-[0.15em] mono-label">Broken</div>
+                    <div className="text-sm font-black text-rose-500 dark:text-rose-400">{suite.lister.totalFailed}</div>
+                  </div>
+                </div>
+                {suite.lister.recommendations.length > 0 && (
+                  <div className="space-y-1">
+                    {suite.lister.recommendations.map((r, i) => (
+                      <div key={i} className="text-[10px] text-gray-600 dark:text-slate-400 leading-relaxed flex items-start gap-1.5">
+                        <span className="text-cyan-500 mt-0.5">▸</span>
+                        <span>{r}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {selected ? (
           <>
             {/* Request Info */}

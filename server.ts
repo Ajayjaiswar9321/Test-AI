@@ -1171,13 +1171,30 @@ interface PageAnalysis {
   pageType: string; // landing, dashboard, auth, ecommerce, blog, form-heavy, generic
 }
 
+const PROD_CHROMIUM_ARGS = [
+  "--no-sandbox",
+  "--disable-dev-shm-usage",
+  "--disable-gpu",
+  "--single-process",
+  "--disable-extensions",
+  "--disable-background-networking",
+  "--disable-default-apps",
+  "--disable-sync",
+  "--disable-translate",
+  "--no-first-run",
+];
+
 async function analyzePage(targetUrl: string): Promise<PageAnalysis> {
-  const browser = await chromium.launch({ headless: true });
+  const isProd = process.env.NODE_ENV === "production";
+  const browser = await chromium.launch({
+    headless: true,
+    args: isProd ? PROD_CHROMIUM_ARGS : [],
+  });
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 
   try {
     await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(isProd ? 500 : 2000);
 
     const analysis: PageAnalysis = await page.evaluate(`(function(){
       var headings = Array.from(document.querySelectorAll("h1,h2,h3")).map(function(h){
@@ -1631,6 +1648,12 @@ const eventQueues = new Map<string, any[]>();
 const activeBrowsers = new Map<string, any>();
 const stopFlags = new Set<string>();
 
+// Lightweight health check — safe for uptime pingers (cron-job.org, UptimeRobot)
+// to hit every 10 min and keep the Render free-tier container warm.
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, uptime: process.uptime() });
+});
+
 // Test History Routes
 app.get("/api/test-history", authenticate, async (_req, res) => {
   try {
@@ -1899,6 +1922,164 @@ app.post("/api/run-api-test", authenticate, async (req, res) => {
       aiNotes: `Request failed: ${err.message}. Check if the URL is correct and the server is reachable.`,
     });
   }
+});
+
+// Multi-agent API testing pipeline:
+//   Agent 1 (Executor): runs every endpoint, captures response/timing/network error
+//   Agent 2 (Validator): inspects each response for correctness — schema, status,
+//                         auth/CORS issues, data plausibility (Gemini, heuristic fallback)
+//   Agent 3 (Lister):    aggregates a suite-level report with warnings + recommendations
+app.post("/api/run-api-agents", authenticate, async (req, res) => {
+  const { endpoints } = req.body;
+  if (!Array.isArray(endpoints) || endpoints.length === 0) {
+    return res.status(400).json({ error: "endpoints[] is required" });
+  }
+
+  type ExecResult = {
+    id: string;
+    name: string;
+    method: string;
+    url: string;
+    passed: boolean;
+    response: { statusCode: number; body: string; time: number; size: number };
+    error?: string;
+  };
+
+  type ValidationResult = {
+    id: string;
+    verdict: "proper" | "warning" | "broken";
+    checks: Array<{ label: string; ok: boolean; note?: string }>;
+    notes: string;
+  };
+
+  // ---------- Agent 1: Executor (parallel with per-request timeout) ----------
+  // Cap each request at 10s so an unreachable or hung endpoint can't stall the suite.
+  const REQUEST_TIMEOUT_MS = 10_000;
+  const execResults: ExecResult[] = await Promise.all(endpoints.map(async (ep: any, idx: number): Promise<ExecResult> => {
+    const id = ep.id || `ep_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 7)}`;
+    const method = (ep.method || "GET").toUpperCase();
+    const headers: Record<string, string> = { ...(ep.headers || {}) };
+    const fetchOptions: any = { method, headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) };
+    if (ep.body && ["POST", "PUT", "PATCH"].includes(method)) {
+      fetchOptions.body = ep.body;
+      if (!headers["Content-Type"]) headers["Content-Type"] = "application/json";
+    }
+
+    const started = Date.now();
+    try {
+      if (!ep.url) throw new Error("Missing URL");
+      const apiRes = await fetch(ep.url, fetchOptions);
+      const time = Date.now() - started;
+      let body = await apiRes.text();
+      try { body = JSON.stringify(JSON.parse(body), null, 2); } catch {}
+      return {
+        id,
+        name: ep.name || ep.url,
+        method,
+        url: ep.url,
+        passed: apiRes.ok,
+        response: {
+          statusCode: apiRes.status,
+          body,
+          time,
+          size: new TextEncoder().encode(body).length,
+        },
+      };
+    } catch (err: any) {
+      const isTimeout = err?.name === "TimeoutError" || err?.name === "AbortError";
+      const msg = isTimeout ? `Request timed out after ${REQUEST_TIMEOUT_MS}ms` : err.message;
+      return {
+        id,
+        name: ep.name || ep.url || "(unknown)",
+        method,
+        url: ep.url || "",
+        passed: false,
+        response: { statusCode: 0, body: `Network Error: ${msg}`, time: Date.now() - started, size: 0 },
+        error: msg,
+      };
+    }
+  }));
+
+  // ---------- Agent 2: Validator ----------
+  const runHeuristicChecks = (r: ExecResult) => {
+    const checks: Array<{ label: string; ok: boolean; note?: string }> = [];
+    checks.push({ label: "Reachable", ok: r.response.statusCode > 0, note: r.error });
+    checks.push({ label: "2xx status", ok: r.response.statusCode >= 200 && r.response.statusCode < 300 });
+    const ct = r.response.statusCode > 0 ? (r.passed ? "body received" : "error body") : "no response";
+    let looksJson = false;
+    try { JSON.parse(r.response.body); looksJson = true; } catch {}
+    checks.push({ label: "Valid JSON body", ok: looksJson, note: looksJson ? undefined : ct });
+    checks.push({ label: "Response < 3s", ok: r.response.time > 0 && r.response.time < 3000, note: `${r.response.time}ms` });
+    checks.push({ label: "Non-empty payload", ok: r.response.size > 0 });
+    return checks;
+  };
+
+  // Gemini calls in parallel — on a 20-endpoint suite this is ~20x faster than sequential.
+  const validationResults: ValidationResult[] = await Promise.all(execResults.map(async (r): Promise<ValidationResult> => {
+    const checks = runHeuristicChecks(r);
+    const failedChecks = checks.filter(c => !c.ok);
+    const broken = !r.passed || r.response.statusCode === 0 || r.response.statusCode >= 500;
+    const verdict: ValidationResult["verdict"] = broken ? "broken" : failedChecks.length ? "warning" : "proper";
+
+    let notes = "";
+    if (GEMINI_KEY) {
+      try {
+        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const result = await model.generateContent(
+          `You are an API validator. In ONE short sentence (< 25 words), say whether this API response looks correct or flag the specific issue. Method: ${r.method} ${r.url}. Status: ${r.response.statusCode}. Time: ${r.response.time}ms. Body (first 400 chars): ${r.response.body.substring(0, 400)}`
+        );
+        notes = result.response.text().trim();
+      } catch {}
+    }
+    if (!notes) {
+      if (verdict === "proper") notes = `Response looks healthy (${r.response.statusCode}, ${r.response.time}ms).`;
+      else if (verdict === "warning") notes = `Reachable but ${failedChecks.map(c => c.label.toLowerCase()).join(", ")} failed.`;
+      else notes = r.error ? `Network/auth error: ${r.error}` : `Server returned ${r.response.statusCode}.`;
+    }
+
+    return { id: r.id, verdict, checks, notes };
+  }));
+
+  // ---------- Agent 3: Lister ----------
+  const byId = new Map(validationResults.map(v => [v.id, v]));
+  const list = execResults.map(r => {
+    const v = byId.get(r.id)!;
+    return {
+      id: r.id,
+      name: r.name,
+      method: r.method,
+      url: r.url,
+      statusCode: r.response.statusCode,
+      time: r.response.time,
+      size: r.response.size,
+      verdict: v.verdict,
+      notes: v.notes,
+    };
+  });
+
+  const totalPassed = list.filter(x => x.verdict === "proper").length;
+  const totalWarning = list.filter(x => x.verdict === "warning").length;
+  const totalFailed = list.filter(x => x.verdict === "broken").length;
+  const avgTime = list.length ? Math.round(list.reduce((s, x) => s + x.time, 0) / list.length) : 0;
+  const recommendations: string[] = [];
+  if (totalFailed) recommendations.push(`${totalFailed} endpoint(s) unreachable or 5xx — verify base URL and server health.`);
+  if (totalWarning) recommendations.push(`${totalWarning} endpoint(s) responded but failed quality checks (non-JSON, slow, or empty).`);
+  if (avgTime > 1500) recommendations.push(`Average response time ${avgTime}ms is high — consider caching or pagination.`);
+  if (!recommendations.length) recommendations.push("All endpoints passed quality checks.");
+
+  res.json({
+    tester: execResults,
+    validator: validationResults,
+    lister: {
+      list,
+      totalPassed,
+      totalWarning,
+      totalFailed,
+      totalEndpoints: list.length,
+      avgTime,
+      recommendations,
+    },
+  });
 });
 
 app.post("/api/import-postman", authenticate, async (req, res) => {
@@ -2365,9 +2546,13 @@ Reply with ONLY the suggestion, no code.`;
         url = urlMatch ? urlMatch[1] : "https://example.com";
       }
 
-      const browser = await chromium.launch({ headless: true });
+      const isProd = process.env.NODE_ENV === "production";
+      const browser = await chromium.launch({
+        headless: true,
+        args: isProd ? PROD_CHROMIUM_ARGS : [],
+      });
       activeBrowsers.set(runId, browser);
-      const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 });
+      const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: isProd ? 1 : 2 });
 
       // KaneAI-like: Network monitoring during test
       const networkLog: Array<{ url: string; method: string; status?: number; type: string; time: string }> = [];
@@ -2384,9 +2569,13 @@ Reply with ONLY the suggestion, no code.`;
       page.on("pageerror", function onPageErr(err: any) { jsErrors.push(err.message); });
       page.on("console", function onConsole(msg: any) { if (msg.type() === "error") jsErrors.push(msg.text()); });
 
+      const captureQuality = isProd ? 40 : 85;
+      const frameQuality = isProd ? 20 : 65;
+      const frameInterval = isProd ? 1500 : 600;
+
       const capture = async (): Promise<string> => {
         try {
-          const shot = await page.screenshot({ type: "jpeg", quality: 85 });
+          const shot = await page.screenshot({ type: "jpeg", quality: captureQuality });
           return `data:image/jpeg;base64,${shot.toString("base64")}`;
         } catch { return ""; }
       };
@@ -2397,11 +2586,11 @@ Reply with ONLY the suggestion, no code.`;
         if (capturingFrame || stopFlags.has(runId)) return;
         capturingFrame = true;
         try {
-          const shot = await page.screenshot({ type: "jpeg", quality: 65 });
+          const shot = await page.screenshot({ type: "jpeg", quality: frameQuality });
           emit({ type: "frame", preview: `data:image/jpeg;base64,${shot.toString("base64")}` });
         } catch {}
         capturingFrame = false;
-      }, 600);
+      }, frameInterval);
 
       // Wrap step to auto-analyze failures
       const stepWithAnalysis = async (action: string, status: "running" | "passed" | "failed", detail = "", preview?: string) => {
@@ -2428,7 +2617,9 @@ Reply with ONLY the suggestion, no code.`;
           await smartStep(stepText,"running");
           try {
             await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-            await page.waitForLoadState("networkidle").catch(() => {});
+            // Cap networkidle: many sites (analytics, chat widgets, websockets) never
+            // go idle, and Playwright's default 30s timeout would stall every step.
+            await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
             const preview = await capture();
             await smartStep(stepText,"passed", `Loaded ${url}`, preview);
           } catch (err: any) {
@@ -3157,4 +3348,15 @@ async function startServer() {
   });
 }
 
-startServer();
+// Only start the HTTP listener when this file is the entry point.
+// When imported by a serverless handler (e.g. api/index.ts on Vercel),
+// skip startServer() — the platform owns the request lifecycle — and
+// just ensure the datastore is initialized before exporting the app.
+const isDirectRun = !!process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url);
+if (isDirectRun) {
+  startServer();
+} else {
+  await store.init();
+}
+
+export default app;
