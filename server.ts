@@ -1695,7 +1695,7 @@ app.post("/api/settings/ai-key", authenticate, async (req, res) => {
   // Test the key first
   try {
     const testAi = new GoogleGenerativeAI(trimmedKey);
-    const model = testAi.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = testAi.getGenerativeModel({ model: "gemini-2.0-flash" });
     const result = await model.generateContent("Say OK");
     const text = result.response.text();
     if (!text) throw new Error("Empty response from Gemini");
@@ -1902,7 +1902,7 @@ app.post("/api/run-api-test", authenticate, async (req, res) => {
     let aiNotes = "";
     if (GEMINI_KEY) {
       try {
-        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = ai.getGenerativeModel({ model: "gemini-2.0-flash" });
         const result = await model.generateContent(
           `Analyze this API response in 1-2 sentences. Method: ${endpoint.method} ${endpoint.url}. Status: ${apiRes.status}. Response (first 500 chars): ${responseBody.substring(0, 500)}. Say if the response looks correct, any issues, data quality.`
         );
@@ -2024,7 +2024,7 @@ app.post("/api/run-api-agents", authenticate, async (req, res) => {
     let notes = "";
     if (GEMINI_KEY) {
       try {
-        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = ai.getGenerativeModel({ model: "gemini-2.0-flash" });
         const result = await model.generateContent(
           `You are an API validator. In ONE short sentence (< 25 words), say whether this API response looks correct or flag the specific issue. Method: ${r.method} ${r.url}. Status: ${r.response.statusCode}. Time: ${r.response.time}ms. Body (first 400 chars): ${r.response.body.substring(0, 400)}`
         );
@@ -2120,7 +2120,7 @@ app.post("/api/import-postman", authenticate, async (req, res) => {
     let code = "";
     if (GEMINI_KEY) {
       try {
-        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = ai.getGenerativeModel({ model: "gemini-2.0-flash" });
         const result = await model.generateContent(`Generate Playwright API tests for: ${prompt}. Return ONLY code.`);
         const response = await result.response;
         code = response.text().replace(/```typescript|```ts|```/g, "").trim();
@@ -2161,7 +2161,7 @@ app.post("/api/generate-ui-test", authenticate, async (req, res) => {
     let code = "";
     if (GEMINI_KEY) {
       try {
-        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = ai.getGenerativeModel({ model: "gemini-2.0-flash" });
         const result = await model.generateContent(`Generate a Playwright UI test for URL ${url} based on: ${prd}. Return ONLY code.`);
         const response = await result.response;
         code = response.text().replace(/```typescript|```ts|```/g, "").trim();
@@ -2207,7 +2207,7 @@ app.post("/api/ui-plan", authenticate, async (req, res) => {
     // Step 2: Generate plan via AI (with page analysis context)
     if (GEMINI_KEY) {
       try {
-        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = ai.getGenerativeModel({ model: "gemini-2.0-flash" });
         const formsContext = pageAnalysis?.forms?.length ? `
 FORMS DETECTED (${pageAnalysis.forms.length}):
 ${pageAnalysis.forms.map((f, i) => `  Form ${i + 1} (${f.formType}): method=${f.method}, submit="${f.submitButton}"
@@ -2498,7 +2498,7 @@ Reply with ONLY the suggestion, no code.`;
       let suggestion = "";
       if (GEMINI_KEY) {
         try {
-          const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+          const model = ai.getGenerativeModel({ model: "gemini-2.0-flash" });
           const result = await model.generateContent(prompt);
           suggestion = result.response.text();
         } catch {}
@@ -3290,7 +3290,7 @@ ${ragContext || ""}`;
     // Priority 1: Gemini
     if (GEMINI_KEY) {
       try {
-        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash", systemInstruction: systemPrompt });
+        const model = ai.getGenerativeModel({ model: "gemini-2.0-flash", systemInstruction: systemPrompt });
         const result = await model.generateContent(message);
         const response = result.response;
         const responseText = response.text() || "";
