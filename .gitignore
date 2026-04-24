@@ -8,8 +8,10 @@ coverage/
 !.env.example
 .agent/
 .gemini/
+.qlaude/
 *.db
 test-results/
 workspace/
 supabase/.temp/
 .vercel
+data/

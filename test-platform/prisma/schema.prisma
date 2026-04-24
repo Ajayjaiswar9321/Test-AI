@@ -1,0 +1,164 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TestStatus {
+  READY
+  PROCESSING
+  FAILED
+  DRAFT
+}
+
+enum RunStatus {
+  PASSED
+  FAILED
+  RUNNING
+  CANCELLED
+  QUEUED
+}
+
+enum NotificationSetting {
+  OFF
+  DEFAULT
+  CUSTOM
+}
+
+model Test {
+  id                  String              @id @default(cuid())
+  name                String
+  status              TestStatus          @default(DRAFT)
+  instructions        String              @db.Text
+  generatedCode       String?             @db.Text
+  schedule            String?
+  notificationSetting NotificationSetting @default(DEFAULT)
+  baseUrl             String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  runs            Run[]
+  secrets         TestSecret[]
+  suiteTests      SuiteTest[]
+  processingSteps ProcessingStep[]
+
+  @@index([status])
+  @@index([updatedAt])
+}
+
+model Run {
+  id            String    @id @default(cuid())
+  testId        String
+  test          Test      @relation(fields: [testId], references: [id], onDelete: Cascade)
+  suiteRunId    String?
+  suiteRun      SuiteRun? @relation(fields: [suiteRunId], references: [id], onDelete: SetNull)
+  status        RunStatus @default(QUEUED)
+  duration      Int?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  errorMessage  String?   @db.Text
+  consoleOutput String?   @db.Text
+  screenshotUrl String?
+  videoUrl      String?
+  rrwebEvents   String?   @db.Text
+  steps         RunStep[]
+  createdAt     DateTime  @default(now())
+
+  @@index([testId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model RunStep {
+  id         String    @id @default(cuid())
+  runId      String
+  run        Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  stepIndex  Int
+  action     String
+  selector   String?
+  value      String?
+  status     RunStatus @default(QUEUED)
+  duration   Int?
+  error      String?
+  screenshot String?
+  createdAt  DateTime  @default(now())
+
+  @@index([runId])
+}
+
+model ProcessingStep {
+  id          String   @id @default(cuid())
+  testId      String
+  test        Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  stepIndex   Int
+  title       String
+  description String?
+  status      String   @default("pending")
+  createdAt   DateTime @default(now())
+
+  @@index([testId])
+}
+
+model Suite {
+  id          String     @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  tests SuiteTest[]
+  runs  SuiteRun[]
+}
+
+model SuiteTest {
+  id      String @id @default(cuid())
+  suiteId String
+  suite   Suite  @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  testId  String
+  test    Test   @relation(fields: [testId], references: [id], onDelete: Cascade)
+  order   Int    @default(0)
+
+  @@unique([suiteId, testId])
+}
+
+model SuiteRun {
+  id          String    @id @default(cuid())
+  suiteId     String
+  suite       Suite     @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  status      RunStatus @default(QUEUED)
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  runs Run[]
+
+  @@index([suiteId])
+}
+
+model TestSecret {
+  id     String  @id @default(cuid())
+  testId String?
+  test   Test?   @relation(fields: [testId], references: [id], onDelete: Cascade)
+  key    String
+  value  String
+
+  @@index([testId])
+}
+
+model ApiToken {
+  id        String    @id @default(cuid())
+  name      String
+  token     String    @unique
+  lastUsed  DateTime?
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+}
+
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String @db.Text
+}

@@ -8,17 +8,22 @@ import {
   ChevronRight,
   X,
   Lock,
-  FileCode2,
-  ClipboardList,
-  Copy,
-  Check,
-  Download,
   Sun,
   Moon,
   History,
+  MessageSquare,
+  GitBranch,
+  Menu,
+  Zap,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { Tabs } from "./components/Tabs";
 import { ConsoleStream, type StreamLog } from "./components/ConsoleStream";
+import { ProfilePanel } from "./components/ProfilePanel";
+import { SidebarSection, SidebarLink } from "./components/SidebarBits";
+import { TemplatesModal, FeedbackModal, CICDModal } from "./components/ToolModals";
+import { AnalyticsDashboard } from "./components/AnalyticsDashboard";
 import { SidebarFixChat } from "./components/SidebarFixChat";
 import { CodeViewer } from "./components/CodeViewer";
 import { UploadPostman } from "./components/UploadPostman";
@@ -31,7 +36,7 @@ import { TestHistory } from "./components/TestHistory";
 import { motion, AnimatePresence } from "motion/react";
 
 type State = {
-  activeTab: "api" | "ui" | "history";
+  activeTab: "api" | "ui" | "history" | "analytics";
   isChatOpen: boolean;
   isDark: boolean;
   token: string | null;
@@ -90,6 +95,19 @@ export default function App() {
   const [runQueue, setRunQueue] = useState<string[]>([]);
   const [chatAutoMessage, setChatAutoMessage] = useState<string | null>(null);
   const [chatResetKey, setChatResetKey] = useState(0);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [cicdOpen, setCicdOpen] = useState(false);
+  const [oauthMsg, setOauthMsg] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("sidebar_collapsed") === "1";
+  });
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  useEffect(() => {
+    localStorage.setItem("sidebar_collapsed", sidebarCollapsed ? "1" : "0");
+  }, [sidebarCollapsed]);
   const autoRunAfterPlanRef = useRef(false);
   const activeScenarioRef = useRef<string | null>(null);
   const runHadErrorRef = useRef(false);
@@ -184,6 +202,43 @@ export default function App() {
       if (!state.isChatOpen) dispatch({ type: "TOGGLE_CHAT" });
     }
   }, [allReports, state.testRunning, uiPlan]);
+
+  // Pick up OAuth-issued token from callback redirect: /?token=...
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token");
+    const err = params.get("oauth_error");
+    if (token) {
+      localStorage.setItem("bro_token", token);
+      dispatch({ type: "SET_TOKEN", payload: token });
+      // Clean the URL so a refresh doesn't keep the token in history
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (err) {
+      const provider = params.get("provider") || "OAuth";
+      setOauthMsg(`${provider} sign-in failed: ${err.replace(/_/g, " ")}`);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
+  const handleOauthLogin = async (provider: string) => {
+    setOauthMsg(null);
+    try {
+      const res = await fetch(`/api/auth/oauth/${provider}/start`);
+      if (res.ok) {
+        const { url } = await res.json();
+        if (url) { window.location.href = url; return; }
+      }
+      if (res.status === 503) {
+        const providerName = provider.charAt(0).toUpperCase() + provider.slice(1);
+        const envVar = `${provider.toUpperCase()}_CLIENT_ID`;
+        setOauthMsg(`${providerName} sign-in needs ${envVar} + ${envVar.replace("_ID", "_SECRET")} in server .env`);
+        return;
+      }
+      setOauthMsg(`Failed to start ${provider} login (HTTP ${res.status})`);
+    } catch (err: any) {
+      setOauthMsg(err?.message || "Sign-in failed");
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -536,43 +591,6 @@ export default function App() {
     }
   };
 
-  // Script viewer mini-component
-  const ScriptViewer = ({ code }: { code: string | null }) => {
-    const [copied, setCopied] = useState(false);
-    if (!code) return null;
-    const handleCopy = () => {
-      navigator.clipboard.writeText(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    };
-    const handleDownload = () => {
-      const blob = new Blob([code], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "test.spec.ts";
-      a.click();
-      URL.revokeObjectURL(url);
-    };
-    return (
-      <div className="flex flex-col h-full">
-        <div className="flex items-center justify-between px-3 py-1.5 bg-gray-100 dark:bg-slate-900/80 border-b border-gray-200 dark:border-emerald-500/10 shrink-0">
-          <span className="text-[9px] font-black uppercase tracking-[0.15em] text-emerald-600 dark:text-emerald-500/50 mono-label">test.spec.ts</span>
-          <div className="flex items-center gap-1">
-            <button onClick={handleCopy} className="flex items-center gap-1 px-2 py-1 rounded text-[8px] font-bold uppercase tracking-[0.15em] text-gray-500 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all mono-label">
-              {copied ? <Check size={10} className="text-emerald-500 dark:text-emerald-400" /> : <Copy size={10} />}
-              {copied ? "Copied" : "Copy"}
-            </button>
-            <button onClick={handleDownload} className="flex items-center gap-1 px-2 py-1 rounded text-[8px] font-bold uppercase tracking-[0.15em] text-gray-500 dark:text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 transition-all mono-label">
-              <Download size={10} /> Download
-            </button>
-          </div>
-        </div>
-        <pre className="flex-1 overflow-auto p-3 text-[11px] leading-relaxed font-mono text-emerald-700 dark:text-emerald-300/70 bg-gray-50 dark:bg-slate-950 scrollbar-thin scrollbar-thumb-emerald-500/10">{code}</pre>
-      </div>
-    );
-  };
-
   if (!state.token) {
     return (
       <div className="min-h-screen tech-login-bg flex items-center justify-center p-4 md:p-6 font-sans text-gray-700 dark:text-slate-200 pb-24 relative overflow-hidden">
@@ -663,6 +681,42 @@ export default function App() {
               </motion.button>
             </form>
 
+            {/* OAuth / Social login */}
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.85, duration: 0.4 }} className="mt-5 space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-gradient-to-r from-transparent to-gray-200 dark:to-slate-800" />
+                <span className="text-[9px] text-gray-400 dark:text-slate-600 uppercase tracking-[0.25em] mono-label">Or continue with</span>
+                <div className="h-px flex-1 bg-gradient-to-l from-transparent to-gray-200 dark:to-slate-800" />
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                <motion.button
+                  type="button"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => handleOauthLogin("google")}
+                  className="flex items-center justify-center gap-2 py-2.5 rounded-lg border border-gray-200 dark:border-slate-700/60 bg-white dark:bg-slate-900/60 text-gray-700 dark:text-slate-200 hover:border-emerald-400 dark:hover:border-emerald-500/40 hover:shadow-[0_0_15px_rgba(16,185,129,0.15)] transition-all"
+                  aria-label="Continue with Google"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                  <span className="text-[10px] font-black uppercase tracking-[0.18em] mono-label">Google</span>
+                </motion.button>
+                <motion.button
+                  type="button"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => handleOauthLogin("github")}
+                  className="flex items-center justify-center gap-2 py-2.5 rounded-lg border border-gray-200 dark:border-slate-700/60 bg-white dark:bg-slate-900/60 text-gray-700 dark:text-slate-200 hover:border-emerald-400 dark:hover:border-emerald-500/40 hover:shadow-[0_0_15px_rgba(16,185,129,0.15)] transition-all"
+                  aria-label="Continue with GitHub"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.69 1.25 3.35.96.1-.74.4-1.25.73-1.54-2.55-.29-5.23-1.28-5.23-5.69 0-1.26.45-2.29 1.18-3.09-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.15 1.18a11 11 0 0 1 5.74 0C17.1 4.47 18.06 4.78 18.06 4.78c.62 1.59.23 2.76.11 3.05.73.8 1.18 1.83 1.18 3.09 0 4.42-2.69 5.4-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5z"/></svg>
+                  <span className="text-[10px] font-black uppercase tracking-[0.18em] mono-label">GitHub</span>
+                </motion.button>
+              </div>
+              {oauthMsg && (
+                <p className="text-[10px] text-rose-500 dark:text-rose-400 text-center font-bold px-3 py-2 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 rounded-lg mono-label">{oauthMsg}</p>
+              )}
+            </motion.div>
+
             {/* Bottom tech decoration */}
             <div className="flex items-center justify-center gap-3 mt-6 pt-4 border-t border-gray-200 dark:border-slate-800/50">
               <div className="h-px flex-1 bg-gradient-to-r from-transparent to-emerald-500/20" />
@@ -682,6 +736,13 @@ export default function App() {
         <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent hidden dark:block" />
 
         <div className="flex items-center gap-2 md:gap-4">
+          <button
+            onClick={() => setMobileNavOpen(true)}
+            aria-label="Open menu"
+            className="md:hidden p-2 -ml-1 rounded-lg text-gray-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 border border-transparent hover:border-emerald-200 dark:hover:border-emerald-500/20 transition-all"
+          >
+            <Menu size={18} />
+          </button>
           <div className="neon-glow rounded-lg">
             <LogoMark size={28} />
           </div>
@@ -699,6 +760,15 @@ export default function App() {
           <motion.button
             whileHover={{ scale: 1.08 }}
             whileTap={{ scale: 0.92 }}
+            onClick={() => setProfileOpen(true)}
+            aria-label="Profile"
+            className="p-2 rounded-lg text-gray-500 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 border border-transparent hover:border-emerald-200 dark:hover:border-emerald-500/20 transition-all duration-300"
+          >
+            <UserIcon size={18} />
+          </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.08 }}
+            whileTap={{ scale: 0.92 }}
             onClick={handleLogout}
             className="p-2 rounded-lg text-gray-500 dark:text-slate-500 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 border border-transparent hover:border-rose-200 dark:hover:border-rose-500/20 transition-all duration-300"
           >
@@ -708,37 +778,143 @@ export default function App() {
       </header>
 
       <main className="flex-1 flex overflow-hidden">
-        <nav className="hidden md:flex w-14 border-r border-gray-200 dark:border-emerald-500/10 flex-col items-center py-6 gap-4 bg-gray-50/50 dark:bg-slate-950/50 shrink-0">
-          {[
-            { id: "ui" as const, icon: <Layout size={18} /> },
-            { id: "api" as const, icon: <Database size={18} /> },
-            { id: "history" as const, icon: <History size={18} /> },
-          ].map((item) => (
-            <motion.button
-              key={item.id}
-              whileHover={{ scale: 1.12 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={() => dispatch({ type: "SET_TAB", payload: item.id })}
-              className={`p-2.5 rounded-lg transition-all duration-300 relative ${state.activeTab === item.id ? "bg-emerald-50 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(16,185,129,0.15)]" : "text-gray-400 dark:text-slate-600 hover:text-gray-700 dark:hover:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800/50 border border-transparent"}`}
+        {/* Mobile backdrop */}
+        <AnimatePresence>
+          {mobileNavOpen && (
+            <motion.div
+              key="nav-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setMobileNavOpen(false)}
+              className="md:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+            />
+          )}
+        </AnimatePresence>
+
+        <motion.nav
+          animate={{
+            width: sidebarCollapsed && !mobileNavOpen ? 56 : 224,
+          }}
+          transition={{ type: "spring", stiffness: 320, damping: 32 }}
+          className={`border-r border-gray-200 dark:border-emerald-500/10 flex-col bg-white dark:bg-slate-950 md:bg-gray-50/50 md:dark:bg-slate-950/50 shrink-0 overflow-hidden z-50 md:z-auto
+            fixed md:relative inset-y-0 left-0 md:inset-auto
+            ${mobileNavOpen ? "flex" : "hidden"} md:flex
+            shadow-2xl md:shadow-none
+          `}
+        >
+          {/* Mobile drawer header (close button) */}
+          <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-emerald-500/10">
+            <span className="text-[11px] font-black uppercase tracking-[0.22em] text-emerald-600 dark:text-emerald-400 mono-label">Menu</span>
+            <button
+              onClick={() => setMobileNavOpen(false)}
+              aria-label="Close menu"
+              className="p-1.5 rounded-lg text-gray-500 dark:text-slate-500 hover:text-gray-900 dark:hover:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-800/50 transition-colors"
             >
-              {item.icon}
-              {state.activeTab === item.id && (
-                <motion.div
-                  layoutId="nav-indicator"
-                  className="absolute -right-px top-1/2 -translate-y-1/2 w-0.5 h-5 bg-emerald-500 rounded-l-full shadow-[0_0_8px_rgba(16,185,129,0.5)]"
-                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                />
-              )}
-            </motion.button>
-          ))}
-        </nav>
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Sections */}
+          <div className="flex-1 flex flex-col py-3 overflow-y-auto scrollbar-thin">
+            <SidebarSection label="Testing" collapsed={sidebarCollapsed}>
+              {[
+                { id: "ui" as const, label: "UI Automation", icon: <Layout size={16} /> },
+                { id: "api" as const, label: "API Testing", icon: <Database size={16} /> },
+                { id: "history" as const, label: "History", icon: <History size={16} /> },
+              ].map((item) => {
+                const isActive = state.activeTab === item.id;
+                return (
+                  <motion.button
+                    key={item.id}
+                    whileTap={{ scale: 0.97 }}
+                    onClick={() => { dispatch({ type: "SET_TAB", payload: item.id }); setMobileNavOpen(false); }}
+                    title={sidebarCollapsed ? item.label : undefined}
+                    className={`group w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all relative mono-label ${
+                      isActive
+                        ? "bg-emerald-50 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30"
+                        : "text-gray-500 dark:text-slate-500 hover:text-gray-900 dark:hover:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-800/50 border border-transparent"
+                    }`}
+                  >
+                    <span className="shrink-0">{item.icon}</span>
+                    {!sidebarCollapsed && (
+                      <span className="text-[11px] font-black uppercase tracking-[0.12em] truncate">{item.label}</span>
+                    )}
+                    {isActive && (
+                      <motion.div
+                        layoutId="nav-indicator"
+                        className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-emerald-500 rounded-r-full shadow-[0_0_8px_rgba(16,185,129,0.5)]"
+                        transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                      />
+                    )}
+                  </motion.button>
+                );
+              })}
+            </SidebarSection>
+
+            <SidebarSection label="Tools" collapsed={sidebarCollapsed}>
+              <SidebarLink
+                collapsed={sidebarCollapsed}
+                icon={<Zap size={16} />}
+                label="Templates"
+                title="Playwright templates (a11y, perf, e2e)"
+                onClick={() => { setTemplatesOpen(true); setMobileNavOpen(false); }}
+              />
+              <SidebarLink
+                collapsed={sidebarCollapsed}
+                icon={<Activity size={16} />}
+                label="Analytics"
+                title="Live dashboard + test history"
+                onClick={() => { dispatch({ type: "SET_TAB", payload: "analytics" }); setMobileNavOpen(false); }}
+              />
+              <SidebarLink
+                collapsed={sidebarCollapsed}
+                icon={<GitBranch size={16} />}
+                label="CI/CD"
+                title="Generate pipeline config (GitHub Actions, CircleCI, Jenkins, GitLab)"
+                onClick={() => { setCicdOpen(true); setMobileNavOpen(false); }}
+              />
+              <SidebarLink
+                collapsed={sidebarCollapsed}
+                icon={<MessageSquare size={16} />}
+                label="Feedback"
+                title="Send feedback"
+                onClick={() => { setFeedbackOpen(true); setMobileNavOpen(false); }}
+              />
+            </SidebarSection>
+
+            <SidebarSection label="Account" collapsed={sidebarCollapsed}>
+              <SidebarLink
+                collapsed={sidebarCollapsed}
+                icon={<UserIcon size={16} />}
+                label="Profile"
+                title="Profile"
+                onClick={() => { setProfileOpen(true); setMobileNavOpen(false); }}
+              />
+            </SidebarSection>
+          </div>
+
+          {/* Collapse toggle — desktop only */}
+          <button
+            onClick={() => setSidebarCollapsed((c) => !c)}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="hidden md:flex border-t border-gray-200 dark:border-emerald-500/10 px-3 py-2.5 items-center justify-center gap-2 text-gray-400 dark:text-slate-600 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-gray-100 dark:hover:bg-emerald-500/5 transition-colors"
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+            {!sidebarCollapsed && <span className="text-[9px] font-black uppercase tracking-[0.2em] mono-label">Collapse</span>}
+          </button>
+        </motion.nav>
 
         <div className="flex-1 flex flex-col overflow-hidden relative">
-          <Tabs tabs={[{ id: "ui", label: "UI Automation", icon: <Layout size={14} /> }, { id: "api", label: "API Testing", icon: <Database size={14} /> }, { id: "history", label: "History", icon: <History size={14} /> }]} activeTab={state.activeTab} onChange={(id) => dispatch({ type: "SET_TAB", payload: id as any })} />
+          <Tabs tabs={[{ id: "ui", label: "UI Automation", icon: <Layout size={14} /> }, { id: "api", label: "API Testing", icon: <Database size={14} /> }, { id: "analytics", label: "Analytics", icon: <Activity size={14} /> }, { id: "history", label: "History", icon: <History size={14} /> }]} activeTab={state.activeTab} onChange={(id) => dispatch({ type: "SET_TAB", payload: id as any })} />
           <div className="flex-1 flex overflow-hidden p-2 md:p-5 gap-3 md:gap-5 min-h-0 max-h-full">
             <div className="flex-1 flex flex-col gap-6 min-w-0">
               <AnimatePresence mode="wait">
-                {state.activeTab === "history" ? (
+                {state.activeTab === "analytics" ? (
+                  <motion.div key="analytics" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="flex-1 flex flex-col min-h-0">
+                    <AnalyticsDashboard token={state.token || ""} />
+                  </motion.div>
+                ) : state.activeTab === "history" ? (
                   <motion.div key="history" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="flex-1 flex flex-col min-h-0">
                     <TestHistory token={state.token || ""} onAuthError={handleAuthFailure} />
                   </motion.div>
@@ -766,50 +942,15 @@ export default function App() {
                           <UiAutomationPlanner planning={uiPlanLoading} scenarios={uiPlan} helperText={uiPlanSummary} initialUrl={uiPlanUrl} onGeneratePlan={handleGenerateUiPlan} onRunScenario={handleRunUiScenario} onRunAll={handleStartRunQueue} onStop={handleStopTest} runQueue={runQueue} onApproveNext={handleApproveNext} onApproveAll={handleApproveAll} onCancelQueue={handleCancelQueue} onResetPlan={() => { setUiPlan([]); setUiPlanSummary(null); setUiPlanUrl(""); setTestReport(null); setAllReports([]); setGeneratedScript(null); setBottomTab("steps"); activeScenarioRef.current = null; runAllRef.current = false; setRunQueue([]); dispatch({ type: "SET_RUN_ID", payload: null }); dispatch({ type: "SET_PREVIEW_URL", payload: null }); dispatch({ type: "SET_UI_CODE", payload: "" }); dispatch({ type: "SET_TEST_RUNNING", payload: false }); setChatAutoMessage(null); setChatResetKey(k => k + 1); }} />
                         </div>
                         <div className="flex-1 flex flex-col gap-3 min-w-0">
-                          {/* Live Preview */}
+                          {/* Live Preview (full-height) */}
                           <div className="flex-1 min-h-0">
                             <LivePreview previewUrl={state.previewUrl || undefined} status={state.testRunning ? "running" : state.runId ? "completed" : "idle"} targetUrl={state.runId ? uiPlanUrl : undefined} />
                           </div>
 
-                          {/* Tabbed Bottom Panel */}
+                          {/* Hidden — drives test report + script capture via onLog */}
                           {state.runId && (
-                            <div className="h-40 md:h-52 shrink-0 flex flex-col bg-white dark:bg-slate-950 border border-gray-200 dark:border-emerald-500/10 rounded-xl overflow-hidden neon-border">
-                              {/* Tab Bar */}
-                              <div className="flex items-center gap-1 px-2 pt-1.5 pb-0 bg-gray-50 dark:bg-slate-900/80 border-b border-gray-200 dark:border-emerald-500/10 shrink-0">
-                                {[
-                                  { id: "steps" as const, label: "Steps", icon: <ClipboardList size={11} /> },
-                                  { id: "script" as const, label: "Script", icon: <FileCode2 size={11} />, badge: generatedScript ? true : false },
-                                ].map((tab) => (
-                                  <button
-                                    key={tab.id}
-                                    onClick={() => setBottomTab(tab.id)}
-                                    className={`flex items-center gap-1.5 px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.15em] rounded-t-lg transition-all relative mono-label ${
-                                      bottomTab === tab.id
-                                        ? "bg-white dark:bg-slate-950 text-emerald-600 dark:text-emerald-400 border-x border-t border-emerald-200 dark:border-emerald-500/20 -mb-px z-10"
-                                        : "text-gray-400 dark:text-slate-500 hover:text-gray-700 dark:hover:text-slate-300"
-                                    }`}
-                                  >
-                                    {tab.icon}
-                                    {tab.label}
-                                    {tab.badge && bottomTab !== tab.id && (
-                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                    )}
-                                  </button>
-                                ))}
-                              </div>
-
-                              {/* Tab Content */}
-                              <div className="flex-1 overflow-hidden min-h-0">
-                                {bottomTab === "steps" && (
-                                  <ConsoleStream runId={state.runId} onPreview={(url) => dispatch({ type: "SET_PREVIEW_URL", payload: url })} onLog={handleConsoleLog} />
-                                )}
-                                {bottomTab === "script" && (
-                                  <ScriptViewer code={generatedScript} />
-                                )}
-                                {bottomTab === "script" && !generatedScript && (
-                                  <div className="flex items-center justify-center h-full text-gray-400 dark:text-slate-600 text-[10px] mono-label tracking-[0.15em]">Script will generate post-execution...</div>
-                                )}
-                              </div>
+                            <div className="hidden" aria-hidden="true">
+                              <ConsoleStream runId={state.runId} onPreview={(url) => dispatch({ type: "SET_PREVIEW_URL", payload: url })} onLog={handleConsoleLog} />
                             </div>
                           )}
                         </div>
@@ -822,6 +963,19 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {/* Profile drawer */}
+      <ProfilePanel
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        token={state.token || ""}
+        onLogout={handleLogout}
+      />
+
+      {/* Tool modals */}
+      <TemplatesModal open={templatesOpen} onClose={() => setTemplatesOpen(false)} />
+      <FeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+      <CICDModal open={cicdOpen} onClose={() => setCicdOpen(false)} />
 
       {/* Floating Chat Widget */}
       <AnimatePresence>

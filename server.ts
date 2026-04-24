@@ -13,6 +13,22 @@ import { chromium } from "playwright";
 import { v4 as uuidv4 } from "uuid";
 import dotenv from "dotenv";
 import { retrieveContext } from "./rag-knowledge.js";
+import {
+  asyncHandler,
+  errorHandler,
+  rateLimit,
+  validate,
+  cache,
+  cacheMiddleware,
+  TEST_TEMPLATES,
+  detectTestType,
+  type TestTemplateType,
+  readFeedback,
+  appendFeedback,
+  API_DOCS,
+  badRequest,
+} from "./src/server-helpers.js";
+import { registerFeatures, FEATURE_ENDPOINTS } from "./src/features.js";
 
 dotenv.config();
 
@@ -1629,6 +1645,21 @@ const app = express();
 app.use(express.json({ limit: "10mb" }));
 app.use(cors());
 
+// Global rate limit (generous). Skip SSE (long-lived) and static/health.
+app.use(rateLimit({
+  limit: 300,
+  windowMs: 60_000,
+  skipPaths: ["/api/events/", "/api/health"],
+}));
+
+// Dedicated SQLite for feature tables (teams, schedules, run_history, oauth).
+// Works regardless of main store mode (SQLite or Supabase).
+const featuresDbPath = process.env.NODE_ENV === "production" ? "/app/data/features.db" : "features.db";
+const featuresDb = new Database(featuresDbPath);
+
+// Cache GET responses for a few safe endpoints
+app.use(["/api/ai-status", "/api/scripts", "/api/test-templates"], cacheMiddleware(10_000));
+
 // Middleware for auth
 const authenticate = (req: any, res: any, next: any) => {
   const token = req.headers.authorization?.split(" ")[1];
@@ -1648,10 +1679,115 @@ const eventQueues = new Map<string, any[]>();
 const activeBrowsers = new Map<string, any>();
 const stopFlags = new Set<string>();
 
+// Register feature endpoints (OAuth, teams, schedules, browsers, CI/CD, analytics, history, parallel)
+registerFeatures(app, {
+  db: featuresDb,
+  authenticate,
+  getOrCreateUser: (email: string) => store.getOrCreateUser(email),
+});
+
+// Metadata companion to eventQueues — set when /api/run-tests kicks off, read by /api/runs/live
+const runMetadata = new Map<string, { startedAt: string; url?: string; user?: string }>();
+
+// Live runs endpoint — aggregates active browsers + queued events
+app.get("/api/runs/live", authenticate, (_req, res) => {
+  const runs: any[] = [];
+  activeBrowsers.forEach((_browser, runId) => {
+    const queue = eventQueues.get(runId) || [];
+    const meta = runMetadata.get(runId);
+    // Find latest step event and latest log
+    let currentStep: any = null;
+    let lastLog: any = null;
+    for (let i = queue.length - 1; i >= 0; i--) {
+      const ev = queue[i];
+      if (!currentStep && ev.type === "step") currentStep = ev;
+      if (!lastLog && (ev.message || ev.type === "info")) lastLog = ev;
+      if (currentStep && lastLog) break;
+    }
+    runs.push({
+      runId,
+      url: meta?.url || null,
+      startedAt: meta?.startedAt || queue[0]?.timestamp || null,
+      elapsedMs: meta?.startedAt ? Date.now() - new Date(meta.startedAt).getTime() : null,
+      currentAction: currentStep?.action || null,
+      currentStepStatus: currentStep?.status || null,
+      latestMessage: lastLog?.message || null,
+      eventCount: queue.length,
+      stopRequested: stopFlags.has(runId),
+    });
+  });
+  res.json({ runs, count: runs.length });
+});
+
 // Lightweight health check — safe for uptime pingers (cron-job.org, UptimeRobot)
 // to hit every 10 min and keep the Render free-tier container warm.
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, uptime: process.uptime() });
+});
+
+// --- API Documentation ---
+app.get("/api/docs", (_req, res) => {
+  res.json({ ...API_DOCS, endpoints: [...API_DOCS.endpoints, ...FEATURE_ENDPOINTS] });
+});
+
+// --- Test Templates (accessibility, performance, e2e) ---
+app.get("/api/test-templates", rateLimit({ limit: 60, windowMs: 60_000, key: "templates:list" }), (_req, res) => {
+  res.json({
+    types: ["e2e", "accessibility", "performance"],
+    usage: "GET /api/test-templates/:type?baseUrl=https://example.com&instructions=...",
+    autodetect: "If `instructions` is passed, the type is detected from keywords (a11y/perf/etc).",
+  });
+});
+
+app.get("/api/test-templates/:type", rateLimit({ limit: 60, windowMs: 60_000, key: "templates:get" }), asyncHandler((req, res) => {
+  const { type } = req.params;
+  const baseUrl = typeof req.query.baseUrl === "string" ? req.query.baseUrl : "http://localhost:3000";
+  const instructions = typeof req.query.instructions === "string" ? req.query.instructions : "";
+  const effective: TestTemplateType = type === "auto"
+    ? detectTestType(instructions)
+    : (["e2e", "accessibility", "performance"].includes(type) ? type as TestTemplateType : null as any);
+  if (!effective) throw badRequest("Unknown template type. Use one of: e2e, accessibility, performance, auto");
+
+  const cacheKey = `tmpl:${effective}:${baseUrl}`;
+  const code = cache.get<string>(cacheKey) ?? TEST_TEMPLATES[effective](baseUrl);
+  cache.set(cacheKey, code, 5 * 60_000);
+  res.json({ type: effective, baseUrl, code });
+}));
+
+// --- User Feedback ---
+app.post("/api/feedback", rateLimit({ limit: 10, windowMs: 60_000, key: "feedback:submit" }), asyncHandler((req, res) => {
+  const input = validate<{
+    category: "bug" | "idea" | "question" | "other";
+    message: string;
+    email?: string;
+    page?: string;
+  }>(req.body, {
+    category: { type: "string", required: true, enum: ["bug", "idea", "question", "other"] },
+    message: { type: "string", required: true, min: 3, max: 5000 },
+    email: { type: "string", max: 200, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
+    page: { type: "string", max: 500 },
+  });
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  appendFeedback({
+    id,
+    category: input.category,
+    message: input.message.trim(),
+    email: input.email?.trim(),
+    page: input.page?.trim(),
+    userAgent: req.headers["user-agent"]?.slice(0, 500),
+    createdAt: new Date().toISOString(),
+  });
+  res.status(201).json({ ok: true, id });
+}));
+
+app.get("/api/feedback", authenticate, (_req, res) => {
+  const items = readFeedback();
+  res.json({ items: items.slice(0, 100), total: items.length });
+});
+
+// --- Cache observability ---
+app.get("/api/cache-stats", authenticate, (_req, res) => {
+  res.json(cache.stats());
 });
 
 // Test History Routes
@@ -2463,6 +2599,11 @@ app.post("/api/run-tests", authenticate, async (req, res) => {
   eventQueues.set(runId, []);
 
   const { url: targetUrl, steps: planSteps } = req.body || {};
+  runMetadata.set(runId, {
+    startedAt: new Date().toISOString(),
+    url: typeof targetUrl === "string" ? targetUrl : undefined,
+    user: (req as any).user?.email,
+  });
 
   const emit = (data: any) => {
     eventQueues.get(runId)?.push({ ...data, timestamp: new Date().toISOString() });
@@ -3217,7 +3358,30 @@ Reply with ONLY the suggestion, no code.`;
       await persistRun("failed", err.message);
     } finally {
       log("Run completed.", "info");
-      setTimeout(() => eventQueues.delete(runId), 60000);
+      // Record run into analytics DB
+      try {
+        const meta = runMetadata.get(runId);
+        const durationMs = meta?.startedAt ? Date.now() - new Date(meta.startedAt).getTime() : 0;
+        const queue = eventQueues.get(runId) || [];
+        const finalStep = [...queue].reverse().find((e: any) => e.type === "step" && (e.status === "passed" || e.status === "failed"));
+        const status = finalStep?.status === "failed" ? "failed" : "passed";
+        featuresDb.prepare(`
+          INSERT INTO run_history (id, test_id, browser, status, duration_ms, summary, owner_email, tags)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          `auto_${runId}`,
+          meta?.url ? new URL(meta.url).hostname : "test",
+          "chromium",
+          status,
+          durationMs,
+          `${queue.filter((e: any) => e.type === "step").length} steps${meta?.url ? ` on ${meta.url}` : ""}`,
+          meta?.user || "anonymous",
+          "ui-test"
+        );
+      } catch (err) {
+        console.warn("[analytics] failed to record run:", err);
+      }
+      setTimeout(() => { eventQueues.delete(runId); runMetadata.delete(runId); }, 60000);
     }
   })();
 });
@@ -3340,6 +3504,10 @@ async function startServer() {
       res.sendFile(path.join(__dirname, "dist/index.html"));
     });
   }
+
+  // Global error handler — catches errors forwarded via next(err) or thrown in asyncHandler.
+  // Existing routes using try/catch + res.status().json() are unaffected.
+  app.use(errorHandler);
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
